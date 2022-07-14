@@ -60,6 +60,7 @@ def make_anchor():
   
   anchor_box=tf.transpose(anchor_box,[0,1,3,2])
   return anchor_box
+
 def making_rpn_train(anchor_box,gt_box):
   # anchor_box와 이미지 내 gt_box와의 IoU 계산
   # IoU가 0.7 이상이면 positive sample 0.3 미만이면 negative sample
@@ -91,6 +92,7 @@ def making_rpn_train(anchor_box,gt_box):
   negative_ind=tf.stack([(negative_index[:,0]//9)//31,(negative_index[:,0]//9)%31,negative_index[:,0]%9,iou_negative[:,1]],axis=1)
 
   return iou,positive_ind,negative_ind
+
 def making_valid_positive(anchor_box,gt_box):
   gt_box_size=(gt_box[:,2]-gt_box[:,0])*(gt_box[:,3]-gt_box[:,1])
   anchor_box=tf.reshape(anchor_box,[31*31*9,1,4])
@@ -121,6 +123,7 @@ def making_valid_positive(anchor_box,gt_box):
   positive_ind=tf.stack([(positive_index[:,0]//9)//31,(positive_index[:,0]//9)%31,positive_index[:,0]%9,iou_positive[:,1]],axis=1)
   print(positive_ind.shape)
   return positive_ind
+
 def vision_valid(image,gt_box):
   img_rgb_copy = image.numpy().copy()/255.0
   green_rgb = (125, 255, 51)
@@ -133,11 +136,12 @@ def vision_valid(image,gt_box):
     bottom = rect[2]*image.shape[0]
     
 
-    img_rgb_copy = cv2.rectangle(img_rgb_copy, (left, top), (right, bottom), color=green_rgb, thickness=1)
+    img_rgb_copy = cv2.rectangle(img_rgb_copy, (int(left), int(top)), (int(right), int(bottom)), color=green_rgb, thickness=1)
 
   plt.figure(figsize=(8, 8))
   plt.imshow(img_rgb_copy)
   plt.show()
+
 def making_loss_data(y_true,y_pred,anchor):
     w_a=anchor[:,3]-anchor[:,1]
     h_a=anchor[:,2]-anchor[:,0]
@@ -238,6 +242,7 @@ revision_count=0
 loss_cls=tf.keras.losses.BinaryCrossentropy(from_logits=True)
 loss_bbr=loss_bbr()
 valid_set=voc_valid2.take(5)
+
 for epo in range(1,epoch+1):
   print("Epoch {}/{}".format(epo,epoch))
   for data in voc_train2:
@@ -284,6 +289,8 @@ for epo in range(1,epoch+1):
   if revision_count>=10:
     break
   print("Loss = {}, revision_count = {}".format(tf.reduce_sum(loss),revision_count))
+
+
 for valid in valid_set:
   valid_reg,valid_cls=rpn_model(tf.expand_dims(valid[0],axis=0),training=False)
   print("GT Results")
