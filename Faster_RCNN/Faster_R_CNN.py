@@ -11,10 +11,8 @@ import tensorflow_datasets as tfds
 import numpy as np
 import matplotlib.pyplot as plt
 import cv2
-import keras
+#import keras
 from tqdm import tqdm
-
-
 
 # Patch Data
 dataset,info=tfds.load("voc",with_info=True,split=["test","train+validation[0%:95%]","validation[95%:]"])
@@ -45,29 +43,34 @@ voc_valid2=voc_valid.map(lambda feature: data_preprocess(feature))
 # Paper propose : {scale : [128,256,512], ratio : {0.5, 1, 2}} 
 # anchor shape : {31,31,9,4}
 
+a=tf.constant([0,1,2])
+
+
 def make_anchor():
-  width,height=31,31
+  width,height=tf.constant(31.0),tf.constant(31.0)
   x=tf.range(width) # width는 특성맵의 width
   y=tf.range(height) # height는 특성맵의 height
   X,Y=tf.meshgrid(x,y)
-  center_x=tf.math.add(tf.cast(X,tf.float32),0.5)/31
-  center_y=tf.math.add(tf.cast(Y,tf.float32),0.5)/31
+  center_x=tf.math.add(tf.cast(X,tf.float64),0.5)/31
+  center_y=tf.math.add(tf.cast(Y,tf.float64),0.5)/31
   
-  scale=[128,256,512]
-  ratio1=[0.5,1,2]
+  scale=tf.constant([128,256,512],dtype=tf.float64)
+  ratio1=tf.constant([0.5,1,2],dtype=tf.float64)
   anchor_wh=[]
+  
+  
   for i in scale:
     for r1 in ratio1:
-      w=tf.sqrt((i/500)**2/r1) # width는 원래 input image의 width : 500 가정
-      h=w*r1 # height는 원래 input image의 height : 500 가정
+      w=tf.sqrt(tf.divide(tf.pow(tf.divide(i,500),2),r1)) # width는 원래 input image의 width : 500 가정
+      h=tf.multiply(w,r1) # height는 원래 input image의 height : 500 가정
       anchor_wh.append([w/2,h/2])
 
-  for i in range(len(anchor_wh)):
+  for i in tf.range(tf.shape(anchor_wh)[0]):
     xmin=tf.clip_by_value(center_x-anchor_wh[i][0], 0, 1)
     xmax=tf.clip_by_value(center_x+anchor_wh[i][0], 0, 1)
     ymin=tf.clip_by_value(center_y-anchor_wh[i][1], 0, 1)
     ymax=tf.clip_by_value(center_y+anchor_wh[i][1], 0, 1)
-    if i==0:
+    if tf.equal(i,tf.constant(0)):
       anchor_box=tf.stack([ymin,xmin,ymax,xmax],axis=2)
       anchor_box=tf.expand_dims(anchor_box,axis=3)
     else:
@@ -76,8 +79,10 @@ def make_anchor():
       anchor_box=tf.concat([anchor_box,temp],axis=3)
   
   anchor_box=tf.transpose(anchor_box,[0,1,3,2])
+  anchor_box=tf.cast(anchor_box,dtype=tf.float32)
   return anchor_box
 
+make_anchor()
 
 # making_rpn_train : Old preprocess
 
@@ -188,7 +193,6 @@ def making_loss_data(y_true,y_pred,anchor):
   return tf.stack([t_x_star,t_y_star,t_w_star,t_h_star],axis=1),tf.stack([t_x,t_y,t_w,t_h],axis=1)
 
 
-
 def non_maximum_suppression(b_box,confidence_score):
   # Plan to implement
   return None
@@ -197,11 +201,15 @@ def non_maximum_suppression(b_box,confidence_score):
 # patch_batch : data preprocess for rpn model
 # usage : tfds map function 
 
-def patch_batch(data):
+# Error generate 
+# Because Tensor in condition "if"
+# Tensor is not specified value  
+
+def patch_batch(data,anchor_box):
   image=data['image']
   gt_box=data['bbox']
 
-  anchor_box=make_anchor()
+  anchor_box=anchor_box
   anchor=anchor_box
 
   p_flag=0
@@ -209,7 +217,7 @@ def patch_batch(data):
   gt_box_size=(gt_box[:,2]-gt_box[:,0])*(gt_box[:,3]-gt_box[:,1])
   anchor_box=tf.reshape(anchor_box,[31*31*9,1,4])
   anchor_box_size=(anchor_box[:,:,2]-anchor_box[:,:,0])*(anchor_box[:,:,3]-anchor_box[:,:,1])
-  
+    
   xmin=tf.math.maximum(anchor_box[:,:,1],gt_box[:,1])
   ymin=tf.math.maximum(anchor_box[:,:,0],gt_box[:,0])
   xmax=tf.math.minimum(anchor_box[:,:,3],gt_box[:,3])
@@ -222,8 +230,6 @@ def patch_batch(data):
   union=gt_box_size[tf.newaxis,:]+anchor_box_size-intersection3
   iou=intersection3/union
 
-  #print(iou.shape)
-
   # 추가로 해야 할 부분
   # 도출된 iou값을 기준으로 index를 알아와서 positive와 negative 구분하기.
   positive_index=tf.where(iou>=0.7)
@@ -231,8 +237,8 @@ def patch_batch(data):
   negative_index=tf.where(iou<0.3)
   iou_negative=tf.where(iou<0.3)
   positive_pos=tf.where(iou>=0.7,1,0)
-  negative_pos=tf.where(iou<0.3,1,0)
-  unuse_pos=tf.where(tf.logical_and(iou<0.7,iou>=0.3),1,0)
+  #negative_pos=tf.where(iou<0.3,1,0)
+  #unuse_pos=tf.where(tf.logical_and(iou<0.7,iou>=0.3),1,0)
 
   nop=tf.reduce_sum(positive_pos)
 
@@ -240,15 +246,14 @@ def patch_batch(data):
   positive_ind=tf.stack([(positive_index[:,0]//9)//31,(positive_index[:,0]//9)%31,positive_index[:,0]%9,iou_positive[:,1]],axis=1)
   negative_ind=tf.stack([(negative_index[:,0]//9)//31,(negative_index[:,0]//9)%31,negative_index[:,0]%9,iou_negative[:,1]],axis=1)
 
-  #print(positive_index.shape,negative_ind.shape)
-
   pdata=tf.zeros([0,4])
   pindex=tf.ones([0,4],dtype=tf.int64)
+
+  # 여기부분 조건문만 바꾸면 해결 가능할 것 같다.
 
   if tf.math.less_equal(nop,tf.constant(128)):
     if tf.math.not_equal(nop,tf.constant(0)):
       pindex=tf.random.shuffle(positive_ind,name='positive_shuffle')
-      #print(pindex.shape)
       pdata=tf.gather_nd(anchor,indices=[tf.stack([pindex[:,0],pindex[:,1],pindex[:,2]],axis=1)])
       pdata=tf.reshape(pdata,(-1,4))
       #number of positive
@@ -290,6 +295,7 @@ def patch_batch(data):
     batch_gt=tf.gather(gt_box,indices=gt_list)
     batch_pos=tf.gather(batch_pos,indices=tindex)
 
+  # 상관없는 부분
   w_a=batch_anchor[:,3]-batch_anchor[:,1]
   h_a=batch_anchor[:,2]-batch_anchor[:,0]
   t_x_star=(batch_gt[:,1]-batch_anchor[:,1])/w_a
@@ -301,6 +307,10 @@ def patch_batch(data):
   return image,batch_label,batch_anchor,batch_gt,gt_list,batch_pos,batch_reg_gt
   # 추출해야할 요소 : Anchor_box의 좌표정보와 대응되는 gt_box의 좌표정보. 
   # making_rpn_train에서 iou정보를 이용해서 마지막 차원에 몇번째 gt_box와 대응되는지 알아야함.
+
+
+anchor_box=make_anchor()
+voc_train3=voc_train2.map(lambda x,y=anchor_box :patch_batch(x,y))
 
 
 # RPN Network
@@ -317,7 +327,7 @@ rpn_model.summary()
 
 
 # Huber Loss
-class loss_bbr(keras.losses.Loss):
+class Loss_bbr(tf.keras.losses.Loss):
   def __init__(self,threshold=1,**kwargs):
     self.threshold=threshold
     super().__init__(**kwargs)
@@ -343,7 +353,7 @@ valid_loss_list=[10]
 best_valid_loss_index=0
 revision_count=0
 loss_cls=tf.keras.losses.BinaryCrossentropy(from_logits=True)
-loss_bbr=loss_bbr()
+loss_bbr=Loss_bbr()
 valid_set=voc_valid2.take(5)
 
 #image_batch=5
@@ -421,6 +431,4 @@ for epo in range(1,epoch+1):
   if revision_count>=5:
     break
   print("Train_Loss = {}, Valid_Loss={}, revision_count = {}".format(train_loss_list[epo],valid_loss_list[epo],revision_count))
-
-
 
