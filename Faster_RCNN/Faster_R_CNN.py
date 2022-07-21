@@ -43,9 +43,6 @@ voc_valid2=voc_valid.map(lambda feature: data_preprocess(feature))
 # Paper propose : {scale : [128,256,512], ratio : {0.5, 1, 2}} 
 # anchor shape : {31,31,9,4}
 
-a=tf.constant([0,1,2])
-
-
 def make_anchor():
   width,height=tf.constant(31.0),tf.constant(31.0)
   x=tf.range(width) # width는 특성맵의 width
@@ -82,7 +79,7 @@ def make_anchor():
   anchor_box=tf.cast(anchor_box,dtype=tf.float32)
   return anchor_box
 
-make_anchor()
+anchor_box=make_anchor()
 
 # making_rpn_train : Old preprocess
 
@@ -156,7 +153,6 @@ def making_valid_positive(anchor_box,gt_box):
 
 
 # vision_valid : print image and bbox
-
 def vision_valid(image,gt_box):
   img_rgb_copy = image.numpy().copy()/255.0
   green_rgb = (125, 255, 51)
@@ -169,7 +165,7 @@ def vision_valid(image,gt_box):
     bottom = rect[2]*image.shape[0]
     
 
-    img_rgb_copy = cv2.rectangle(img_rgb_copy, (left, top), (right, bottom), color=green_rgb, thickness=1)
+    img_rgb_copy = cv2.rectangle(img_rgb_copy, (int(left), int(top)), (int(right), int(bottom)), color=green_rgb, thickness=1)
 
   plt.figure(figsize=(8, 8))
   plt.imshow(img_rgb_copy)
@@ -212,8 +208,6 @@ def patch_batch(data,anchor_box):
   anchor_box=anchor_box
   anchor=anchor_box
 
-  p_flag=0
-
   gt_box_size=(gt_box[:,2]-gt_box[:,0])*(gt_box[:,3]-gt_box[:,1])
   anchor_box=tf.reshape(anchor_box,[31*31*9,1,4])
   anchor_box_size=(anchor_box[:,:,2]-anchor_box[:,:,0])*(anchor_box[:,:,3]-anchor_box[:,:,1])
@@ -239,62 +233,37 @@ def patch_batch(data,anchor_box):
   positive_pos=tf.where(iou>=0.7,1,0)
   #negative_pos=tf.where(iou<0.3,1,0)
   #unuse_pos=tf.where(tf.logical_and(iou<0.7,iou>=0.3),1,0)
-
+    
   nop=tf.reduce_sum(positive_pos)
-
+  nop2=tf.clip_by_value(nop,0,128)
 
   positive_ind=tf.stack([(positive_index[:,0]//9)//31,(positive_index[:,0]//9)%31,positive_index[:,0]%9,iou_positive[:,1]],axis=1)
   negative_ind=tf.stack([(negative_index[:,0]//9)//31,(negative_index[:,0]//9)%31,negative_index[:,0]%9,iou_negative[:,1]],axis=1)
 
-  pdata=tf.zeros([0,4])
-  pindex=tf.ones([0,4],dtype=tf.int64)
-
+  nop2=tf.constant(0)
   # 여기부분 조건문만 바꾸면 해결 가능할 것 같다.
-
-  if tf.math.less_equal(nop,tf.constant(128)):
-    if tf.math.not_equal(nop,tf.constant(0)):
-      pindex=tf.random.shuffle(positive_ind,name='positive_shuffle')
-      pdata=tf.gather_nd(anchor,indices=[tf.stack([pindex[:,0],pindex[:,1],pindex[:,2]],axis=1)])
-      pdata=tf.reshape(pdata,(-1,4))
-      #number of positive
-      nop=tf.shape(positive_index)[0]
-    else:
-      p_flag=1
-  else:
-    pindex=tf.random.shuffle(positive_ind,name='positive_shuffle')[:128]
-    pdata=tf.gather_nd(anchor,indices=[tf.stack([pindex[:,0],pindex[:,1],pindex[:,2]],axis=1)])
-    pdata=tf.reshape(pdata,(-1,4))
-    nop=tf.constant(128)
+  pindex=tf.random.shuffle(positive_ind,name='positive_shuffle')[:nop2]
+  pdata=tf.gather_nd(anchor,indices=[tf.stack([pindex[:,0],pindex[:,1],pindex[:,2]],axis=1)])
+  pdata=tf.reshape(pdata,(-1,4))
 
   #number of negative
-  non=tf.subtract(tf.constant(256),nop)
+  non=tf.subtract(tf.constant(256),nop2)
   nindex=tf.random.shuffle(negative_ind,name='negative_shuffle')[:non]
   ndata=tf.gather_nd(anchor,indices=[tf.stack([nindex[:,0],nindex[:,1],nindex[:,2]],axis=1)])
   ndata=tf.reshape(ndata,(-1,4))
 
-  label_list=tf.concat([tf.ones((nop,1)),tf.zeros((non,1))],axis=0)
-  if p_flag!=1:
-    anchor_list=tf.concat([pdata,ndata],axis=0)
-    gt_list=tf.concat([pindex[:,3],nindex[:,3]],axis=0)
-    batch_pos=tf.concat([pindex[:,:3],nindex[:,:3]],axis=0)
-    tindex=tf.random.shuffle(tf.range(256),name='total_shuffle')
+  label_list=tf.concat([tf.ones((nop2,1)),tf.zeros((non,1))],axis=0)
+  anchor_list=tf.concat([pdata,ndata],axis=0)
+  gt_list=tf.concat([pindex[:,3],nindex[:,3]],axis=0)
+  batch_pos=tf.concat([pindex[:,:3],nindex[:,:3]],axis=0)
+  tindex=tf.random.shuffle(tf.range(256),name='total_shuffle')
 
-    batch_label=tf.gather(label_list,indices=tindex)
-    batch_anchor=tf.gather(anchor_list,indices=tindex)
-    gt_list=tf.gather(gt_list,indices=tindex)
-    batch_gt=tf.gather(gt_box,indices=gt_list)
-    batch_pos=tf.gather(batch_pos,indices=tindex)
-  else:
-    anchor_list=ndata
-    gt_list=nindex[:,3]
-    batch_pos=nindex[:,:3]
-    tindex=tf.random.shuffle(tf.range(256),name='total_shuffle')
-    batch_label=tf.gather(label_list,indices=tindex)
-    batch_anchor=tf.gather(anchor_list,indices=tindex)
-    gt_list=tf.gather(gt_list,indices=tindex)
-    batch_gt=tf.gather(gt_box,indices=gt_list)
-    batch_pos=tf.gather(batch_pos,indices=tindex)
-
+  batch_label=tf.gather(label_list,indices=tindex)
+  batch_anchor=tf.gather(anchor_list,indices=tindex)
+  gt_list=tf.gather(gt_list,indices=tindex)
+  batch_gt=tf.gather(gt_box,indices=gt_list)
+  batch_pos=tf.gather(batch_pos,indices=tindex)
+  
   # 상관없는 부분
   w_a=batch_anchor[:,3]-batch_anchor[:,1]
   h_a=batch_anchor[:,2]-batch_anchor[:,0]
@@ -309,8 +278,20 @@ def patch_batch(data,anchor_box):
   # making_rpn_train에서 iou정보를 이용해서 마지막 차원에 몇번째 gt_box와 대응되는지 알아야함.
 
 
+
 anchor_box=make_anchor()
 voc_train3=voc_train2.map(lambda x,y=anchor_box :patch_batch(x,y))
+voc_train4=voc_train3.batch(5).prefetch(5)
+
+for i in voc_train4:
+  print(i)
+  break
+
+
+for i in voc_train2:
+  data=i
+  break
+
 
 
 # RPN Network
@@ -358,10 +339,10 @@ valid_set=voc_valid2.take(5)
 
 #image_batch=5
 
-voc_train3=voc_train2.map(patch_batch)
+voc_train3=voc_train2.map(lambda x,y=anchor_box :patch_batch(x,y))
 voc_train4=voc_train3.batch(5).prefetch(5)
 
-voc_valid3=voc_valid2.map(patch_batch)
+voc_valid3=voc_valid2.map(lambda x,y=anchor_box :patch_batch(x,y))
 voc_valid4=voc_valid3.batch(1).prefetch(1)
 
 # train_rpn_model
@@ -431,4 +412,48 @@ for epo in range(1,epoch+1):
   if revision_count>=5:
     break
   print("Train_Loss = {}, Valid_Loss={}, revision_count = {}".format(train_loss_list[epo],valid_loss_list[epo],revision_count))
+
+
+rpn_model.set_weights(weight)
+
+#rpn_model.save("./model/rpn_net0720")
+
+# check model performance 
+for valid in valid_set:
+  valid_reg,valid_cls=rpn_model(tf.expand_dims(valid["image"],axis=0),training=False)
+  print("GT Results")
+  vision_valid(valid["image"],valid["bbox"])
+  print("Model Results")
+  v_pind=making_valid_positive(anchor_box,valid["bbox"])
+  if v_pind.shape[0]!=0:
+    v_pdata=tf.gather_nd(anchor_box,indices=tf.unstack(v_pind[:,:3]))
+    v_cls=tf.gather_nd(tf.reshape(valid_cls,(31,31,9,1)),indices=tf.unstack(v_pind[:,:3]))
+    proposed_box=tf.image.non_max_suppression(v_pdata,tf.reshape(v_cls,(-1)),5,iou_threshold=1.0)
+    v_pdata = tf.gather(v_pdata, proposed_box)
+    vision_valid(valid["image"],v_pdata)
+
+
+# ----------------------------------------------------------------------- #
+
+## Implement NMS + ROI 풀링 ##
+
+pred_reg,pred_obj
+
+
+print(pred_reg.shape , pred_obj.shape)
+
+
+for data in voc_train4:
+  pred_reg,pred_obj=rpn_model(data[0],training=False) 
+  break
+
+
+pred_reg.shape
+pred_obj.shape
+
+pred_obj
+# tf.sort?
+tf.argsort(pred_obj)
+
+
 
