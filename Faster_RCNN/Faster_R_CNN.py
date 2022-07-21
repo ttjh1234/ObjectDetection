@@ -11,8 +11,14 @@ import tensorflow_datasets as tfds
 import numpy as np
 import matplotlib.pyplot as plt
 import cv2
-#import keras
 from tqdm import tqdm
+import neptune.new as neptune
+
+run = neptune.init(
+    project="sungsu/Faster-R-CNN",
+    api_token="eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiI1YTJmMGZiOC1jYzc0LTRkNTYtYWU1YS1jMGI0YmNmZDU4ZjgifQ==",
+)
+
 
 # Patch Data
 dataset,info=tfds.load("voc",with_info=True,split=["test","train+validation[0%:95%]","validation[95%:]"])
@@ -79,7 +85,6 @@ def make_anchor():
   anchor_box=tf.cast(anchor_box,dtype=tf.float32)
   return anchor_box
 
-anchor_box=make_anchor()
 
 # making_rpn_train : Old preprocess
 
@@ -197,10 +202,6 @@ def non_maximum_suppression(b_box,confidence_score):
 # patch_batch : data preprocess for rpn model
 # usage : tfds map function 
 
-# Error generate 
-# Because Tensor in condition "if"
-# Tensor is not specified value  
-
 def patch_batch(data,anchor_box):
   image=data['image']
   gt_box=data['bbox']
@@ -235,12 +236,11 @@ def patch_batch(data,anchor_box):
   #unuse_pos=tf.where(tf.logical_and(iou<0.7,iou>=0.3),1,0)
     
   nop=tf.reduce_sum(positive_pos)
-  nop2=tf.clip_by_value(nop,0,128)
+  nop2=tf.clip_by_value(nop,tf.constant(0),tf.constant(128))
 
   positive_ind=tf.stack([(positive_index[:,0]//9)//31,(positive_index[:,0]//9)%31,positive_index[:,0]%9,iou_positive[:,1]],axis=1)
   negative_ind=tf.stack([(negative_index[:,0]//9)//31,(negative_index[:,0]//9)%31,negative_index[:,0]%9,iou_negative[:,1]],axis=1)
 
-  nop2=tf.constant(0)
   # 여기부분 조건문만 바꾸면 해결 가능할 것 같다.
   pindex=tf.random.shuffle(positive_ind,name='positive_shuffle')[:nop2]
   pdata=tf.gather_nd(anchor,indices=[tf.stack([pindex[:,0],pindex[:,1],pindex[:,2]],axis=1)])
@@ -278,20 +278,12 @@ def patch_batch(data,anchor_box):
   # making_rpn_train에서 iou정보를 이용해서 마지막 차원에 몇번째 gt_box와 대응되는지 알아야함.
 
 
-
+"""
 anchor_box=make_anchor()
+anchor_box.shape
 voc_train3=voc_train2.map(lambda x,y=anchor_box :patch_batch(x,y))
 voc_train4=voc_train3.batch(5).prefetch(5)
-
-for i in voc_train4:
-  print(i)
-  break
-
-
-for i in voc_train2:
-  data=i
-  break
-
+"""
 
 
 # RPN Network
@@ -327,7 +319,7 @@ class Loss_bbr(tf.keras.losses.Loss):
 
 
 epoch=300
-optimizer=tf.keras.optimizers.Adam()
+optimizer=tf.keras.optimizers.Adam(learning_rate=1e-5)
 anchor_box=make_anchor()
 train_loss_list=[10]
 valid_loss_list=[10]
@@ -346,6 +338,8 @@ voc_valid3=voc_valid2.map(lambda x,y=anchor_box :patch_batch(x,y))
 voc_valid4=voc_valid3.batch(1).prefetch(1)
 
 # train_rpn_model
+
+
 
 for epo in range(1,epoch+1):
   print("Epoch {}/{}".format(epo,epoch))
@@ -366,10 +360,12 @@ for epo in range(1,epoch+1):
       bounding_box_loss=loss_bbr(y_t,y_p)
       train_sub_loss=tf.add_n([objectness_loss/256]+[(bounding_box_loss*4/961)])  
     
+    run["train/iter_loss"].log(train_sub_loss)
     gradients=tape.gradient(train_sub_loss,rpn_model.trainable_variables)
     optimizer.apply_gradients(zip(gradients,rpn_model.trainable_variables))
     train_total_loss=tf.add(train_total_loss,train_sub_loss)
-  train_loss_list.append(tf.reduce_sum(train_total_loss)/501)
+  train_loss_list.append(tf.reduce_sum(train_total_loss)/977)
+  run["train/epoch_loss"].log(tf.reduce_sum(train_total_loss)/977)
 
   for data in tqdm(voc_valid4):
     #image,batch_label,batch_anchor,batch_gt,gt_list,batch_pos,batch_reg_gt
@@ -385,7 +381,8 @@ for epo in range(1,epoch+1):
     valid_sub_loss=tf.add_n([objectness_loss/256]+[(bounding_box_loss*4/961)])
     valid_total_loss=tf.add(valid_total_loss,valid_sub_loss)
 
-  valid_loss_list.append(valid_total_loss/2510)
+  valid_loss_list.append(valid_total_loss/126)
+  run["valid/epoch_loss"].log(valid_total_loss/126)
 
 
   if epo%10==1:
@@ -409,15 +406,19 @@ for epo in range(1,epoch+1):
   else:
     revision_count=revision_count+1
   
-  if revision_count>=5:
+  if revision_count>=10:
     break
   print("Train_Loss = {}, Valid_Loss={}, revision_count = {}".format(train_loss_list[epo],valid_loss_list[epo],revision_count))
 
 
 rpn_model.set_weights(weight)
+url=run.get_run_url().split('/')[-1]
+rpn_model.save_weights(f"./model/rpn_{url}.h5")
 
-#rpn_model.save("./model/rpn_net0720")
+run["model"].upload(f"./model/rpn_{url}.h5")
 
+
+'''
 # check model performance 
 for valid in valid_set:
   valid_reg,valid_cls=rpn_model(tf.expand_dims(valid["image"],axis=0),training=False)
@@ -431,29 +432,64 @@ for valid in valid_set:
     proposed_box=tf.image.non_max_suppression(v_pdata,tf.reshape(v_cls,(-1)),5,iou_threshold=1.0)
     v_pdata = tf.gather(v_pdata, proposed_box)
     vision_valid(valid["image"],v_pdata)
-
+'''
 
 # ----------------------------------------------------------------------- #
 
 ## Implement NMS + ROI 풀링 ##
-
-pred_reg,pred_obj
-
-
-print(pred_reg.shape , pred_obj.shape)
+'''
+#pred_reg,pred_obj
+#print(pred_reg.shape , pred_obj.shape)
 
 
-for data in voc_train4:
-  pred_reg,pred_obj=rpn_model(data[0],training=False) 
-  break
+#for data in voc_train4:
+#  pred_reg,pred_obj=rpn_model(data[0],training=False) 
+#  break
 
 
-pred_reg.shape
-pred_obj.shape
+pred_reg.shape, pred_obj.shape
 
 pred_obj
 # tf.sort?
 tf.argsort(pred_obj)
+
+pred_reg2=tf.reshape(pred_reg,(5,31,31,9,4))
+
+pred_obj2=tf.reshape(pred_obj,(5,-1))
+
+pred_obj2.shape
+
+a,b=tf.math.top_k(pred_obj2,k=6000)
+
+# 역산 
+cal_anc=tf.expand_dims(anchor_box,axis=0)
+pred_reg2.shape
+
+w_a=cal_anc[:,:,:,:,3]-cal_anc[:,:,:,:,1]
+h_a=cal_anc[:,:,:,:,2]-cal_anc[:,:,:,:,0]  
+x=pred_reg2[:,:,:,:,0]*w_a+cal_anc[:,:,:,:,0]
+y=pred_reg2[:,:,:,:,1]*h_a+cal_anc[:,:,:,:,1]
+w=tf.math.exp(pred_reg2[:,:,:,:,2])*w_a
+h=tf.math.exp(pred_reg2[:,:,:,:,3])*h_a
+
+pred_value=tf.stack([x,y,w,h],axis=4)
+  
+candidate=tf.stack([(b//9)//31,(b//9)%31,b%9],axis=2)
+
+
+
+candidate_coord=tf.gather_nd(pred_value,indices=candidate,batch_dims=1)
+
+adjust_coord=tf.clip_by_value(candidate_coord,0,1)
+
+a
+'''
+
+
+
+
+
+
 
 
 
