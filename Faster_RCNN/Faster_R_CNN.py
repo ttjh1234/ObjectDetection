@@ -125,7 +125,7 @@ def making_rpn_train(anchor_box,gt_box):
 # making_valid_positive : For vision model performance, preprocess valid_set
 # Not batch process
 
-def making_valid_positive(anchor_box,gt_box):
+def making_valid_positive(anchor_box,gt_box,iou_threshold):
   gt_box_size=(gt_box[:,2]-gt_box[:,0])*(gt_box[:,3]-gt_box[:,1])
   anchor_box=tf.reshape(anchor_box,[31*31*9,1,4])
   anchor_box_size=(anchor_box[:,:,2]-anchor_box[:,:,0])*(anchor_box[:,:,3]-anchor_box[:,:,1])
@@ -148,8 +148,8 @@ def making_valid_positive(anchor_box,gt_box):
 
   # 추가로 해야 할 부분
   # 도출된 iou값을 기준으로 index를 알아와서 positive와 negative 구분하기.
-  positive_index=tf.where(iou>=0.6)
-  iou_positive=tf.where(iou>=0.6)
+  positive_index=tf.where(iou>=iou_threshold)
+  iou_positive=tf.where(iou>=iou_threshold)
 
 
   positive_ind=tf.stack([(positive_index[:,0]//9)//31,(positive_index[:,0]//9)%31,positive_index[:,0]%9,iou_positive[:,1]],axis=1)
@@ -277,6 +277,42 @@ def patch_batch(data,anchor_box):
   # 추출해야할 요소 : Anchor_box의 좌표정보와 대응되는 gt_box의 좌표정보. 
   # making_rpn_train에서 iou정보를 이용해서 마지막 차원에 몇번째 gt_box와 대응되는지 알아야함.
 
+def inverse_trans(anchor_box,pred_reg):
+  pred_reg2=tf.reshape(pred_reg,(-1,31,31,9,4))
+  # offset을 원래 ymin,xmin,ymax,xmax로 변환
+  cal_anc=tf.expand_dims(anchor_box,axis=0)
+  w_a=cal_anc[:,:,:,:,3]-cal_anc[:,:,:,:,1]
+  h_a=cal_anc[:,:,:,:,2]-cal_anc[:,:,:,:,0]  
+  x=pred_reg2[:,:,:,:,0]*w_a+cal_anc[:,:,:,:,0]
+  y=pred_reg2[:,:,:,:,1]*h_a+cal_anc[:,:,:,:,1]
+  w=tf.math.exp(pred_reg2[:,:,:,:,2])*w_a
+  h=tf.math.exp(pred_reg2[:,:,:,:,3])*h_a
+  x_max=x+w
+  y_max=y+h
+  y=tf.clip_by_value(y,0,1)
+  x=tf.clip_by_value(x,0,1)
+  y_max=tf.clip_by_value(y_max,0,1)
+  x_max=tf.clip_by_value(x_max,0,1)
+  pred_value=tf.stack([y,x,y_max,x_max],axis=4)
+  return pred_value
+
+def valid_result(valid,iou=0.5,max_n=300):
+  valid_reg,valid_cls=rpn_model(tf.expand_dims(valid["image"],axis=0),training=False)
+  print("GT Results")
+  vision_valid(valid["image"],valid["bbox"])
+  print("Model Results")
+  valid_reg2=inverse_trans(anchor_box,valid_reg)
+  valid_reg3=tf.reshape(valid_reg2,(31,31,9,4))
+  v_pind=making_valid_positive(valid_reg3,valid["bbox"],iou)
+  if v_pind.shape[0]!=0:
+    v_pdata=tf.gather_nd(valid_reg3,indices=tf.unstack(v_pind[:,:3]))
+    # anchor_box.shape vs valid_reg.shape
+    v_cls=tf.gather_nd(tf.reshape(valid_cls,(31,31,9,1)),indices=tf.unstack(v_pind[:,:3]))
+    proposed_box=tf.image.non_max_suppression(v_pdata,tf.reshape(v_cls,(-1)),max_n,iou_threshold=0.5)
+    v_pdata = tf.gather(v_pdata, proposed_box)
+    vision_valid(valid["image"],v_pdata)
+
+
 
 """
 anchor_box=make_anchor()
@@ -318,14 +354,14 @@ class Loss_bbr(tf.keras.losses.Loss):
 
 
 
-epoch=300
+epoch=100
 optimizer=tf.keras.optimizers.Adam(learning_rate=1e-5)
 anchor_box=make_anchor()
 train_loss_list=[10]
 valid_loss_list=[10]
 best_valid_loss_index=0
 revision_count=0
-loss_cls=tf.keras.losses.BinaryCrossentropy(from_logits=True)
+loss_cls=tf.keras.losses.BinaryCrossentropy(from_logits=False)
 loss_bbr=Loss_bbr()
 valid_set=voc_valid2.take(5)
 
@@ -351,7 +387,7 @@ for epo in range(1,epoch+1):
     with tf.GradientTape() as tape:
       pred_reg,pred_obj=rpn_model(data[0],training=True)    # pred_reg = (5,31,31,36) , pred_obj= (5,31,31,9)
       pred_reg=tf.reshape(pred_reg,(-1,31,31,9,4)) # (5,31,31,9,4)
-      reg_pos=tf.where(tf.math.equal(tf.cast(data[1],dtype=tf.int64),tf.constant(0,dtype=tf.int64))) # (5,?,4)
+      reg_pos=tf.where(tf.math.equal(tf.cast(data[1],dtype=tf.int64),tf.constant(1,dtype=tf.int64))) # (5,?,4)
       y_t=tf.gather_nd(data[6],indices=reg_pos[:,:2])
       y_p=tf.gather_nd(tf.gather_nd(pred_reg,indices=data[5],batch_dims=1),indices=reg_pos[:,:2])
       pred_obj=tf.gather_nd(pred_obj,indices=data[5],batch_dims=1)# pred_obj= (5,256)
@@ -371,13 +407,13 @@ for epo in range(1,epoch+1):
     #image,batch_label,batch_anchor,batch_gt,gt_list,batch_pos,batch_reg_gt
     pred_reg_valid,pred_obj_valid=rpn_model(data[0],training=False)    # pred_reg = (5,31,31,36) , pred_obj= (5,31,31,9)
     pred_reg_valid=tf.reshape(pred_reg_valid,(-1,31,31,9,4)) # (5,31,31,9,4)
-    reg_pos_valid=tf.where(tf.math.equal(tf.cast(data[1],dtype=tf.int64),tf.constant(0,dtype=tf.int64))) # (5,?,4)
+    reg_pos_valid=tf.where(tf.math.equal(tf.cast(data[1],dtype=tf.int64),tf.constant(1,dtype=tf.int64))) # (5,?,4)
     y_t_valid=tf.gather_nd(data[6],indices=reg_pos_valid[:,:2])
     y_p_valid=tf.gather_nd(tf.gather_nd(pred_reg_valid,indices=data[5],batch_dims=1),indices=reg_pos_valid[:,:2])
     pred_obj_valid=tf.gather_nd(pred_obj_valid,indices=data[5],batch_dims=1)# pred_obj= (5,256)
     pred_obj_valid=tf.expand_dims(pred_obj_valid,2)  
     objectness_loss=loss_cls(data[1],pred_obj_valid) # batch_label(objectness) :(5,256,1) vs pred_obj : (5,256,1) 
-    bounding_box_loss=loss_bbr(y_t,y_p)
+    bounding_box_loss=loss_bbr(y_t_valid,y_p_valid)
     valid_sub_loss=tf.add_n([objectness_loss/256]+[(bounding_box_loss*4/961)])
     valid_total_loss=tf.add(valid_total_loss,valid_sub_loss)
 
@@ -387,17 +423,7 @@ for epo in range(1,epoch+1):
 
   if epo%10==1:
     for valid in valid_set:
-      valid_reg,valid_cls=rpn_model(tf.expand_dims(valid["image"],axis=0),training=False)
-      print("GT Results")
-      vision_valid(valid["image"],valid["bbox"])
-      print("Model Results")
-      v_pind=making_valid_positive(anchor_box,valid["bbox"])
-      if v_pind.shape[0]!=0:
-        v_pdata=tf.gather_nd(anchor_box,indices=tf.unstack(v_pind[:,:3]))
-        v_cls=tf.gather_nd(tf.reshape(valid_cls,(31,31,9,1)),indices=tf.unstack(v_pind[:,:3]))
-        proposed_box=tf.image.non_max_suppression(v_pdata,tf.reshape(v_cls,(-1)),5,iou_threshold=1.0)
-        v_pdata = tf.gather(v_pdata, proposed_box)
-        vision_valid(valid["image"],v_pdata)
+      valid_result(valid,iou=0.5,max_n=300)
       
   if valid_loss_list[best_valid_loss_index]>valid_loss_list[epo]:
     best_valid_loss_index=epo
@@ -414,44 +440,35 @@ for epo in range(1,epoch+1):
 rpn_model.set_weights(weight)
 url=run.get_run_url().split('/')[-1]
 rpn_model.save_weights(f"./model/rpn_{url}.h5")
-
 run["model"].upload(f"./model/rpn_{url}.h5")
 
+run.stop()
 
-'''
-# check model performance 
+rpn_model.load_weights("./model/rpn_FAS-5.h5")
+#f"./model/rpn_{url}.h5"
+
+rpn_model.load_weights(f"./model/rpn_{url}.h5")
+
 for valid in valid_set:
-  valid_reg,valid_cls=rpn_model(tf.expand_dims(valid["image"],axis=0),training=False)
-  print("GT Results")
-  vision_valid(valid["image"],valid["bbox"])
-  print("Model Results")
-  v_pind=making_valid_positive(anchor_box,valid["bbox"])
-  if v_pind.shape[0]!=0:
-    v_pdata=tf.gather_nd(anchor_box,indices=tf.unstack(v_pind[:,:3]))
-    v_cls=tf.gather_nd(tf.reshape(valid_cls,(31,31,9,1)),indices=tf.unstack(v_pind[:,:3]))
-    proposed_box=tf.image.non_max_suppression(v_pdata,tf.reshape(v_cls,(-1)),5,iou_threshold=1.0)
-    v_pdata = tf.gather(v_pdata, proposed_box)
-    vision_valid(valid["image"],v_pdata)
-'''
+  valid_result(valid,iou=0.5,max_n=10)
+
 
 # ----------------------------------------------------------------------- #
 
 ## Implement NMS + ROI 풀링 ##
-'''
+
 #pred_reg,pred_obj
 #print(pred_reg.shape , pred_obj.shape)
 
 
-#for data in voc_train4:
-#  pred_reg,pred_obj=rpn_model(data[0],training=False) 
-#  break
+for data in voc_train4:
+  pred_reg,pred_obj=rpn_model(data[0],training=False) 
+  break
 
 
 pred_reg.shape, pred_obj.shape
 
 pred_obj
-# tf.sort?
-tf.argsort(pred_obj)
 
 pred_reg2=tf.reshape(pred_reg,(5,31,31,9,4))
 
@@ -462,28 +479,39 @@ pred_obj2.shape
 a,b=tf.math.top_k(pred_obj2,k=6000)
 
 # 역산 
-cal_anc=tf.expand_dims(anchor_box,axis=0)
-pred_reg2.shape
-
-w_a=cal_anc[:,:,:,:,3]-cal_anc[:,:,:,:,1]
-h_a=cal_anc[:,:,:,:,2]-cal_anc[:,:,:,:,0]  
-x=pred_reg2[:,:,:,:,0]*w_a+cal_anc[:,:,:,:,0]
-y=pred_reg2[:,:,:,:,1]*h_a+cal_anc[:,:,:,:,1]
-w=tf.math.exp(pred_reg2[:,:,:,:,2])*w_a
-h=tf.math.exp(pred_reg2[:,:,:,:,3])*h_a
-
-pred_value=tf.stack([x,y,w,h],axis=4)
-  
 candidate=tf.stack([(b//9)//31,(b//9)%31,b%9],axis=2)
-
-
+pred_value=inverse_trans(anchor_box,pred_reg)
 
 candidate_coord=tf.gather_nd(pred_value,indices=candidate,batch_dims=1)
 
 adjust_coord=tf.clip_by_value(candidate_coord,0,1)
+candidate
 
-a
-'''
+# 이 상태에서 NMS 알고리즘 적용
+
+# 지금 좌표는 (ymin,xmin,ymax,xmax) 로 구성되어있음. 
+
+test=adjust_coord[0,:,:]
+
+test
+
+# (B,6000,4) 가정, 
+# 일단 (6000,4)로 생각
+# 개수 Threshold 만큼만 뽑아서, (Threshold,4) 차원으로 축소
+# ex) (B, 2000, 4)
+# NMS 구현시, 마지막 최종 결과일때는 끝까지 탐색, Fast RCNN 제안시 2000개로 학습 진행
+
+# 배치마다 confidence_score가 높은 순으로 정렬되어있음.
+
+# 첫 번째와 나머지 모든 것들을 비교해서, iou가 threshold보다 높은 애들을 삭제
+# 첫 번째는 저장. 제거된 행 제외하고, 나머지것들 중에서 다시 계산
+# 반복해서 최초로 2000개가 되면 중지.
+# gather or concat or union?
+# 반복하다가 제거하는 순간 2000개보다 작을수도 있을것 같다.
+# 처음 해서 남은 인덱스들과 그 다음 남은 인덱스들을 합집합하면? 
+# 처음 고려해서 없어졌던 부분들까지 추가되는 문제가 발생.
+# 정말로 사라져야할 애들은 살아남고, 덜 심한 애들이 사라질 수 있지만, 용인해야함.
+# iou 0.5 , 10
 
 
 
