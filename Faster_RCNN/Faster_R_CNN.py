@@ -194,11 +194,6 @@ def making_loss_data(y_true,y_pred,anchor):
   return tf.stack([t_x_star,t_y_star,t_w_star,t_h_star],axis=1),tf.stack([t_x,t_y,t_w,t_h],axis=1)
 
 
-def non_maximum_suppression(b_box,confidence_score):
-  # Plan to implement
-  return None
-
-
 # patch_batch : data preprocess for rpn model
 # usage : tfds map function 
 
@@ -311,15 +306,6 @@ def valid_result(valid,iou=0.5,max_n=300):
     proposed_box=tf.image.non_max_suppression(v_pdata,tf.reshape(v_cls,(-1)),max_n,iou_threshold=0.5)
     v_pdata = tf.gather(v_pdata, proposed_box)
     vision_valid(valid["image"],v_pdata)
-
-
-
-"""
-anchor_box=make_anchor()
-anchor_box.shape
-voc_train3=voc_train2.map(lambda x,y=anchor_box :patch_batch(x,y))
-voc_train4=voc_train3.batch(5).prefetch(5)
-"""
 
 
 # RPN Network
@@ -513,10 +499,51 @@ test
 # 정말로 사라져야할 애들은 살아남고, 덜 심한 애들이 사라질 수 있지만, 용인해야함.
 # iou 0.5 , 10
 
+base_line=test[0]
+b_box=test[1:]
+iou_threshold=0.7
+def calculate_iou(base_line,b_box):
+  base_size=(base_line[2]-base_line[0])*(base_line[3]-base_line[1])
+  bbox_size=(b_box[:,2]-b_box[:,0])*(b_box[:,3]-b_box[:,1])
+    
+  xmin=tf.math.maximum(base_line[1],b_box[:,1])
+  ymin=tf.math.maximum(base_line[0],b_box[:,0])
+  xmax=tf.math.minimum(base_line[3],b_box[:,3])
+  ymax=tf.math.minimum(base_line[2],b_box[:,2])
 
+  intersection=(xmax-xmin)*(ymax-ymin)
+  intersection2=tf.where((xmax>xmin)&(ymax>ymin),intersection,0)
+  intersection3=tf.where(intersection2>0,intersection2,0)
 
+  union=base_size+bbox_size-intersection3
+  iou=intersection3/union 
+  
+  return iou
 
+temp=tf.zeros((0,4))  
+test[0].shape
+iou_list=calculate_iou(test[0],test)
+temp=tf.concat([temp,tf.expand_dims(test[0],axis=0)],axis=0)
+test=tf.gather_nd(test,indices=tf.where(iou_list<iou_threshold))
+test
+i=0
 
+def non_maximum_suppression(test):
+  temp=tf.zeros((0,4))  
+  for i in tf.range(6000):
+    iou_list=calculate_iou(test[i],test)
+    temp=tf.concat([temp,tf.expand_dims(test[i],axis=0)],axis=0)
+    test=tf.gather_nd(test,indices=tf.where(iou_list<iou_threshold))
+    if tf.shape(test)[0]<=(tf.constant(2000)-tf.shape(temp)[0]):
+      required_num=tf.constant(2000)-tf.shape(temp)[0]
+      required_num=tf.clip_by_value(required_num,0,tf.shape(test)[0])
+      temp=tf.concat([temp,test[:required_num]],axis=0)
+      break
+  return temp
+
+non_maximum_suppression(test)
+
+## 수정 필요
 
 
 
