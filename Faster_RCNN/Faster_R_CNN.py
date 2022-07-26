@@ -430,7 +430,7 @@ run["model"].upload(f"./model/rpn_{url}.h5")
 
 run.stop()
 
-rpn_model.load_weights("./model/rpn_FAS-5.h5")
+rpn_model.load_weights("./model/rpn_FAS-8.h5")
 #f"./model/rpn_{url}.h5"
 
 rpn_model.load_weights(f"./model/rpn_{url}.h5")
@@ -462,43 +462,32 @@ pred_obj2=tf.reshape(pred_obj,(5,-1))
 
 pred_obj2.shape
 
+
+pred_obj2=tf.reshape(pred_obj,(5,-1))
 a,b=tf.math.top_k(pred_obj2,k=6000)
 
 # 역산 
+
+pred_obj2=tf.reshape(pred_obj,(5,-1))
+a,b=tf.math.top_k(pred_obj2,k=6000)
 candidate=tf.stack([(b//9)//31,(b//9)%31,b%9],axis=2)
 pred_value=inverse_trans(anchor_box,pred_reg)
 
 candidate_coord=tf.gather_nd(pred_value,indices=candidate,batch_dims=1)
 
 adjust_coord=tf.clip_by_value(candidate_coord,0,1)
-candidate
 
 # 이 상태에서 NMS 알고리즘 적용
 
 # 지금 좌표는 (ymin,xmin,ymax,xmax) 로 구성되어있음. 
+adjust_coord=tf.expand_dims(adjust_coord,axis=2)
+conf_score=tf.expand_dims(a,axis=2)
+proposed,_,_,_=tf.image.combined_non_max_suppression(adjust_coord,conf_score,2000,2000,iou_threshold=0.7)
 
-test=adjust_coord[0,:,:]
 
-test
+proposed
 
-# (B,6000,4) 가정, 
-# 일단 (6000,4)로 생각
-# 개수 Threshold 만큼만 뽑아서, (Threshold,4) 차원으로 축소
-# ex) (B, 2000, 4)
-# NMS 구현시, 마지막 최종 결과일때는 끝까지 탐색, Fast RCNN 제안시 2000개로 학습 진행
-
-# 배치마다 confidence_score가 높은 순으로 정렬되어있음.
-
-# 첫 번째와 나머지 모든 것들을 비교해서, iou가 threshold보다 높은 애들을 삭제
-# 첫 번째는 저장. 제거된 행 제외하고, 나머지것들 중에서 다시 계산
-# 반복해서 최초로 2000개가 되면 중지.
-# gather or concat or union?
-# 반복하다가 제거하는 순간 2000개보다 작을수도 있을것 같다.
-# 처음 해서 남은 인덱스들과 그 다음 남은 인덱스들을 합집합하면? 
-# 처음 고려해서 없어졌던 부분들까지 추가되는 문제가 발생.
-# 정말로 사라져야할 애들은 살아남고, 덜 심한 애들이 사라질 수 있지만, 용인해야함.
-# iou 0.5 , 10
-
+'''
 base_line=test[0]
 b_box=test[1:]
 iou_threshold=0.7
@@ -529,7 +518,7 @@ test
 i=0
 
 def non_maximum_suppression(test):
-  temp=tf.zeros((0,4))  
+  temp=tf.zeros((0,4)) 
   for i in tf.range(6000):
     iou_list=calculate_iou(test[i],test)
     temp=tf.concat([temp,tf.expand_dims(test[i],axis=0)],axis=0)
@@ -540,11 +529,86 @@ def non_maximum_suppression(test):
       temp=tf.concat([temp,test[:required_num]],axis=0)
       break
   return temp
+'''
 
-non_maximum_suppression(test)
+# ROI 풀링
 
-## 수정 필요
+box_indices = tf.random.uniform(shape=(2000,), minval=0,
+maxval=1, dtype=tf.int32)
+c=tf.image.crop_and_resize(
+    data[0],
+    proposed,
+    box_indices,
+    (14,14),
+    method='bilinear',
+    extrapolation_value=0.0,
+    name=None
+)
+
+
+rpn_model.summary()
+
+c.shape
+
+plt.imshow(c[18]/255)
+
+
+plt.imshow(data[0][0]/255)
+proposed[0]
+
+
+## FAST_RCNN Layer
+inputs=tf.keras.Input((2000,14,14,512),name='crop_image_interpolation')
+layer1=tf.keras.layers.TimeDistributed(tf.keras.layers.MaxPool2D((2,2)),name='ROI_Pool')(inputs)
+layer2=tf.keras.layers.TimeDistributed(tf.keras.layers.Flatten(),name='Flatten')(layer1)
+layer3=tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(4096,activation='relu'),name='fc1')(layer2)
+layer4=tf.keras.layers.TimeDistributed(tf.keras.layers.Dropout(0.5),name='Dropout1')(layer3)
+layer5=tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(4096,activation='relu'),name='fc2')(layer4)
+layer6=tf.keras.layers.TimeDistributed(tf.keras.layers.Dropout(0.5),name='Dropout2')(layer5)
+cls_layer=tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(21,activation='softmax',name='classifier'))(layer6)
+reg_layer=tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(4,activation='linear',name='bbox_correction'))(layer6)
+frcn_model=Model(inputs=inputs,outputs=[cls_layer,reg_layer],name='Faster_RCNN_Model')
+frcn_model.summary()
+
+# 모델 출력 후, 제안 영역 좌표 만드는 함수.
+
+for i in voc_train4:
+  tdata=i
+  break
+
+tdata
+
+rpn_model.summary()
+
+#define making_fast_rcnn_input
+def making_frcnn_input(data):
+  pred_reg,pred_obj=rpn_model(data[0],training=False)
+  fmap_ext = tf.keras.Model(rpn_model.input, rpn_model.get_layer('conv2d').output)
+  fmap=fmap_ext(data[0])
+  pred_obj2=tf.reshape(pred_obj,(5,-1))
+  a,b=tf.math.top_k(pred_obj2,k=6000)
+  candidate=tf.stack([(b//9)//31,(b//9)%31,b%9],axis=2)
+  pred_value=inverse_trans(anchor_box,pred_reg)
+  candidate_coord=tf.gather_nd(pred_value,indices=candidate,batch_dims=1)
+  adjust_coord=tf.clip_by_value(candidate_coord,0,1)
+  adjust_coord=tf.expand_dims(adjust_coord,axis=2)
+  proposed,_,_,_=tf.image.combined_non_max_suppression(adjust_coord,conf_score,2000,2000,iou_threshold=0.7)
+  #(5,2000,4)를 한 번에 하는 방법.
+  
+  
+  return None
 
 
 
+box_indices = tf.random.uniform(shape=(2000,), minval=0,
+maxval=1, dtype=tf.int32)
+c=tf.image.crop_and_resize(
+    fmap,
+    proposed[0],
+    box_indices,
+    (14,14),
+    method='bilinear',
+    extrapolation_value=0.0,
+    name=None
+)
 
