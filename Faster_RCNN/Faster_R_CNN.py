@@ -24,6 +24,8 @@ run = neptune.init(
 dataset,info=tfds.load("voc",with_info=True,split=["test","train+validation[0%:95%]","validation[95%:]"])
 info.features['labels'].names
 
+
+
 voc_train,voc_test,voc_valid=dataset[1],dataset[0],dataset[2]
 
 # Dat preprocess  
@@ -548,29 +550,6 @@ reg_layer=tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(4,activation='li
 frcn_model=Model(inputs=inputs,outputs=[cls_layer,reg_layer],name='Faster_RCNN_Model')
 frcn_model.summary()
 
-# 모델 출력 후, 제안 영역 좌표 만드는 함수.
-
-max_label=0
-max_gt=0
-for i in voc_train2:
-  if tf.shape(i['label'])[0]>max_label:
-    max_label=tf.shape(i['label'])[0]  
-  #if tf.shape(i['bbox'])[0]>max_gt:
-    #max_gt=tf.shape(i['bbox'])[0]
-max_label
-
-info
-
-
-voc_train5=voc_train2.batch(5).prefetch(5)
-
-for i in voc_train5:
-  data2=i
-  break
-
-tf.pad(data2['label'],)
-
-rpn_model.summary()
 
 #define making_fast_rcnn_input
 def making_frcnn_input(data):
@@ -588,10 +567,12 @@ def making_frcnn_input(data):
   
   '''
   # Extract RoI Feature Map
+  
   img=data['image']
   img=tf.expand_dims(img,axis=0)
   gt_box=data['bbox']
-    
+  label=data['label']
+     
   pred_reg,pred_obj=rpn_model(img,training=False)
   fmap_ext = tf.keras.Model(rpn_model.input, rpn_model.get_layer('conv2d').output)
   fmap=fmap_ext(img)
@@ -605,42 +586,61 @@ def making_frcnn_input(data):
   conf_score=tf.expand_dims(a,axis=2)
   proposed,_,_,_=tf.image.combined_non_max_suppression(adjust_coord,conf_score,2000,2000,iou_threshold=0.7)
   proposed2=tf.reshape(proposed,(-1,4))
-  box_indices = tf.repeat(tf.range(tf.shape(fmap)[0]),(2000,2000,2000,2000,2000))
+  box_indices = tf.repeat(tf.range(tf.shape(fmap)[0]),tf.repeat(tf.constant(2000),tf.shape(fmap)[0]))
   c=tf.image.crop_and_resize(fmap,proposed2,box_indices,(14,14))
-  c2=tf.reshape(c,(-1,2000,14,14,512))
+  crop_fmap=tf.reshape(c,(-1,2000,14,14,512))
 
-  # Extract Correspoding label ang gtbox
-  #data2['image']
+  # Extract Corresponding label ang gtbox
+  # data2['image']
+  # proposed와 각 이미지마다 gt_box들간의 iou 계산해서 가장 높은 값을 라벨,
+  # iou가 일정 수보다 낮다면, bg로 라벨. ex)0.5
+  # 
+  gt_box=tf.reshape(gt_box,(-1,1,42,4))
+  gt_box_size=(gt_box[:,:,:,2]-gt_box[:,:,:,0])*(gt_box[:,:,:,3]-gt_box[:,:,:,1])
   
-  # Transform gtbox coord
+  ac=tf.expand_dims(proposed,axis=2)
+  ac_size=(ac[:,:,:,2]-ac[:,:,:,0])*(ac[:,:,:,3]-ac[:,:,:,1])
+
+  xmin=tf.math.maximum(ac[:,:,:,1],gt_box[:,:,:,1])
+  ymin=tf.math.maximum(ac[:,:,:,0],gt_box[:,:,:,0])
+  xmax=tf.math.minimum(ac[:,:,:,3],gt_box[:,:,:,3])
+  ymax=tf.math.minimum(ac[:,:,:,2],gt_box[:,:,:,2])
+
+  intersection=(xmax-xmin)*(ymax-ymin)
+  intersection2=tf.where((xmax>xmin)&(ymax>ymin),intersection,0)
+  intersection3=tf.where(intersection2>0,intersection2,0)
+
+  union=gt_box_size+ac_size-intersection3
+  iou=intersection3/union
+  iou2=tf.where(iou>=0.5,iou,0)
+
+  iou3=tf.gather_nd(iou2,indices=tf.expand_dims(tf.math.argmax(iou2,axis=2),axis=2),batch_dims=2)
+  plabel=tf.gather_nd(label,indices=tf.expand_dims(tf.math.argmax(iou2,axis=2),axis=2),batch_dims=0)
   
-  return c2,None,None
-
-
-data=data2
-img=data['image']
-pred_reg,pred_obj=rpn_model(img,training=False)
-fmap_ext = tf.keras.Model(rpn_model.input, rpn_model.get_layer('conv2d').output)
-fmap=fmap_ext(img)
-pred_obj2=tf.reshape(pred_obj,(tf.shape(fmap)[0],-1))
-a,b=tf.math.top_k(pred_obj2,k=6000)
-candidate=tf.stack([(b//9)//31,(b//9)%31,b%9],axis=2)
-pred_value=inverse_trans(anchor_box,pred_reg)
-candidate_coord=tf.gather_nd(pred_value,indices=candidate,batch_dims=1)
-adjust_coord=tf.clip_by_value(candidate_coord,0,1)
-adjust_coord=tf.expand_dims(adjust_coord,axis=2)
-conf_score=tf.expand_dims(a,axis=2)
-proposed,_,_,_=tf.image.combined_non_max_suppression(adjust_coord,conf_score,2000,2000,iou_threshold=0.7)
-proposed2=tf.reshape(proposed,(-1,4))
-box_indices = tf.repeat(tf.range(tf.shape(fmap)[0]),(2000,2000,2000,2000,2000))
-c=tf.image.crop_and_resize(fmap,proposed2,box_indices,(14,14))
-c2=tf.reshape(c,(-1,2000,14,14,512))
-
-adjust_coord
+  p_iou=tf.where(iou3>=0.5,plabel,-1)
+  gt_box2=tf.reshape(gt_box,(-1,42,4))
+  
+  
+  p_coord=tf.gather_nd(gt_box2,indices=tf.expand_dims(tf.math.argmax(iou2,axis=2),axis=2),batch_dims=1)
+  
+  # Transform gtbox coord to offset
+  w_a=proposed[:,:,3]-proposed[:,:,1]
+  h_a=proposed[:,:,2]-proposed[:,:,0]
+  t_x_star=(p_coord[:,:,1]-proposed[:,:,1])/w_a
+  t_y_star=(p_coord[:,:,0]-proposed[:,:,0])/h_a
+  t_w_star=tf.math.log((p_coord[:,:,3]-p_coord[:,:,1])/w_a)
+  t_h_star=tf.math.log((p_coord[:,:,2]-p_coord[:,:,0])/h_a)
+  
+  offset=tf.stack([t_x_star,t_y_star,t_w_star,t_h_star],axis=2)
+  
+  return crop_fmap, p_iou, offset
 
 
 voc_train6=voc_train2.map(lambda data: making_frcnn_input(data))
 
+for i in voc_train6:
+  data=i
+  break
 
 
 
@@ -648,20 +648,7 @@ voc_train6=voc_train2.map(lambda data: making_frcnn_input(data))
 
 
 
-data['bbox']
 
-gt_box_size=(gt_box[:,2]-gt_box[:,0])*(gt_box[:,3]-gt_box[:,1])
-anchor_box=tf.reshape(anchor_box,[31*31*9,1,4])
-anchor_box_size=(anchor_box[:,:,2]-anchor_box[:,:,0])*(anchor_box[:,:,3]-anchor_box[:,:,1])
-  
-xmin=tf.math.maximum(anchor_box[:,:,1],gt_box[:,1])
-ymin=tf.math.maximum(anchor_box[:,:,0],gt_box[:,0])
-xmax=tf.math.minimum(anchor_box[:,:,3],gt_box[:,3])
-ymax=tf.math.minimum(anchor_box[:,:,2],gt_box[:,2])
 
-intersection=(xmax-xmin)*(ymax-ymin)
-intersection2=tf.where((xmax>xmin)&(ymax>ymin),intersection,0)
-intersection3=tf.where(intersection2>0,intersection2,0)
 
-union=gt_box_size[tf.newaxis,:]+anchor_box_size-intersection3
-iou=intersection3/union
+
