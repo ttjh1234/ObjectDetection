@@ -31,13 +31,17 @@ voc_train,voc_test,voc_valid=dataset[1],dataset[0],dataset[2]
 
 def data_preprocess(feature):
   img=feature['image']
-  #label=feature['labels']
+  label=feature['objects']['label']
   bbox=feature['objects']['bbox']
-  #paddings = [[0, 100-tf.shape(bbox)[0]], [0, 0]]
-  #bbox = tf.pad(bbox, paddings, 'CONSTANT', constant_values=0)
-  #bbox=tf.reshape(bbox,(100,4))
+  paddings1 = [[0, 42-tf.shape(bbox)[0]], [0, 0]]
+  bbox = tf.pad(bbox, paddings1, 'CONSTANT', constant_values=0)
+  bbox=tf.reshape(bbox,(42,4))
+  paddings2 = [[0,42-tf.shape(label)[0]]]
+  label = tf.pad(label, paddings2, 'CONSTANT', constant_values=0)
+  label= tf.reshape(label,(42,))
   image=tf.image.resize(img,[500,500])
-  return {"image":image,"bbox":bbox}
+
+  return {"image":image,"bbox":bbox,"label":label}
 
 voc_train2=voc_train.map(lambda feature: data_preprocess(feature))
 voc_test2=voc_test.map(lambda feature: data_preprocess(feature))
@@ -531,32 +535,6 @@ def non_maximum_suppression(test):
   return temp
 '''
 
-# ROI 풀링
-
-box_indices = tf.random.uniform(shape=(2000,), minval=0,
-maxval=1, dtype=tf.int32)
-c=tf.image.crop_and_resize(
-    data[0],
-    proposed,
-    box_indices,
-    (14,14),
-    method='bilinear',
-    extrapolation_value=0.0,
-    name=None
-)
-
-
-rpn_model.summary()
-
-c.shape
-
-plt.imshow(c[18]/255)
-
-
-plt.imshow(data[0][0]/255)
-proposed[0]
-
-
 ## FAST_RCNN Layer
 inputs=tf.keras.Input((2000,14,14,512),name='crop_image_interpolation')
 layer1=tf.keras.layers.TimeDistributed(tf.keras.layers.MaxPool2D((2,2)),name='ROI_Pool')(inputs)
@@ -572,43 +550,118 @@ frcn_model.summary()
 
 # 모델 출력 후, 제안 영역 좌표 만드는 함수.
 
-for i in voc_train4:
-  tdata=i
+max_label=0
+max_gt=0
+for i in voc_train2:
+  if tf.shape(i['label'])[0]>max_label:
+    max_label=tf.shape(i['label'])[0]  
+  #if tf.shape(i['bbox'])[0]>max_gt:
+    #max_gt=tf.shape(i['bbox'])[0]
+max_label
+
+info
+
+
+voc_train5=voc_train2.batch(5).prefetch(5)
+
+for i in voc_train5:
+  data2=i
   break
 
-tdata
+tf.pad(data2['label'],)
 
 rpn_model.summary()
 
 #define making_fast_rcnn_input
 def making_frcnn_input(data):
-  pred_reg,pred_obj=rpn_model(data[0],training=False)
+  '''
+  
+  input :
+  data['image'] : image (B,500,500,3)
+  data['bbox'] : ground_truth_box
+  data['label'] : true label
+  
+  output :
+  RoI Feature Map : (B,2000,14,14,512)
+  RoI corresponding label : (B,2000,) , label class=21 (fg(20)+bg(1))
+  RoI corresponding gtbox : (B,2000,4)
+  
+  '''
+  # Extract RoI Feature Map
+  img=data['image']
+  img=tf.expand_dims(img,axis=0)
+  gt_box=data['bbox']
+    
+  pred_reg,pred_obj=rpn_model(img,training=False)
   fmap_ext = tf.keras.Model(rpn_model.input, rpn_model.get_layer('conv2d').output)
-  fmap=fmap_ext(data[0])
-  pred_obj2=tf.reshape(pred_obj,(5,-1))
+  fmap=fmap_ext(img)
+  pred_obj2=tf.reshape(pred_obj,(tf.shape(fmap)[0],-1))
   a,b=tf.math.top_k(pred_obj2,k=6000)
   candidate=tf.stack([(b//9)//31,(b//9)%31,b%9],axis=2)
   pred_value=inverse_trans(anchor_box,pred_reg)
   candidate_coord=tf.gather_nd(pred_value,indices=candidate,batch_dims=1)
   adjust_coord=tf.clip_by_value(candidate_coord,0,1)
   adjust_coord=tf.expand_dims(adjust_coord,axis=2)
+  conf_score=tf.expand_dims(a,axis=2)
   proposed,_,_,_=tf.image.combined_non_max_suppression(adjust_coord,conf_score,2000,2000,iou_threshold=0.7)
-  #(5,2000,4)를 한 번에 하는 방법.
+  proposed2=tf.reshape(proposed,(-1,4))
+  box_indices = tf.repeat(tf.range(tf.shape(fmap)[0]),(2000,2000,2000,2000,2000))
+  c=tf.image.crop_and_resize(fmap,proposed2,box_indices,(14,14))
+  c2=tf.reshape(c,(-1,2000,14,14,512))
+
+  # Extract Correspoding label ang gtbox
+  #data2['image']
   
+  # Transform gtbox coord
   
-  return None
+  return c2,None,None
+
+
+data=data2
+img=data['image']
+pred_reg,pred_obj=rpn_model(img,training=False)
+fmap_ext = tf.keras.Model(rpn_model.input, rpn_model.get_layer('conv2d').output)
+fmap=fmap_ext(img)
+pred_obj2=tf.reshape(pred_obj,(tf.shape(fmap)[0],-1))
+a,b=tf.math.top_k(pred_obj2,k=6000)
+candidate=tf.stack([(b//9)//31,(b//9)%31,b%9],axis=2)
+pred_value=inverse_trans(anchor_box,pred_reg)
+candidate_coord=tf.gather_nd(pred_value,indices=candidate,batch_dims=1)
+adjust_coord=tf.clip_by_value(candidate_coord,0,1)
+adjust_coord=tf.expand_dims(adjust_coord,axis=2)
+conf_score=tf.expand_dims(a,axis=2)
+proposed,_,_,_=tf.image.combined_non_max_suppression(adjust_coord,conf_score,2000,2000,iou_threshold=0.7)
+proposed2=tf.reshape(proposed,(-1,4))
+box_indices = tf.repeat(tf.range(tf.shape(fmap)[0]),(2000,2000,2000,2000,2000))
+c=tf.image.crop_and_resize(fmap,proposed2,box_indices,(14,14))
+c2=tf.reshape(c,(-1,2000,14,14,512))
+
+adjust_coord
+
+
+voc_train6=voc_train2.map(lambda data: making_frcnn_input(data))
 
 
 
-box_indices = tf.random.uniform(shape=(2000,), minval=0,
-maxval=1, dtype=tf.int32)
-c=tf.image.crop_and_resize(
-    fmap,
-    proposed[0],
-    box_indices,
-    (14,14),
-    method='bilinear',
-    extrapolation_value=0.0,
-    name=None
-)
 
+
+
+
+
+data['bbox']
+
+gt_box_size=(gt_box[:,2]-gt_box[:,0])*(gt_box[:,3]-gt_box[:,1])
+anchor_box=tf.reshape(anchor_box,[31*31*9,1,4])
+anchor_box_size=(anchor_box[:,:,2]-anchor_box[:,:,0])*(anchor_box[:,:,3]-anchor_box[:,:,1])
+  
+xmin=tf.math.maximum(anchor_box[:,:,1],gt_box[:,1])
+ymin=tf.math.maximum(anchor_box[:,:,0],gt_box[:,0])
+xmax=tf.math.minimum(anchor_box[:,:,3],gt_box[:,3])
+ymax=tf.math.minimum(anchor_box[:,:,2],gt_box[:,2])
+
+intersection=(xmax-xmin)*(ymax-ymin)
+intersection2=tf.where((xmax>xmin)&(ymax>ymin),intersection,0)
+intersection3=tf.where(intersection2>0,intersection2,0)
+
+union=gt_box_size[tf.newaxis,:]+anchor_box_size-intersection3
+iou=intersection3/union
