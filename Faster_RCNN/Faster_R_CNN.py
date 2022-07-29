@@ -2,6 +2,15 @@
 # Faster RCNN Before Modularization
 
 # Library list
+import subprocess
+import sys
+
+try:
+    import neptune.new as neptune
+except:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "neptune-client"])
+    import neptune.new as neptune
+
 
 import tensorflow as tf
 from tensorflow.keras.applications.vgg16 import VGG16
