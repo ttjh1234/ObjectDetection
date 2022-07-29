@@ -347,7 +347,7 @@ class Loss_bbr(tf.keras.losses.Loss):
     return {**base_config}
 
 
-
+'''
 epoch=100
 optimizer=tf.keras.optimizers.Adam(learning_rate=1e-5)
 anchor_box=make_anchor()
@@ -446,7 +446,7 @@ rpn_model.load_weights(f"./model/rpn_{url}.h5")
 for valid in valid_set:
   valid_result(valid,iou=0.5,max_n=10)
 
-
+'''
 # ----------------------------------------------------------------------- #
 
 ## Implement NMS + ROI 풀링 ##
@@ -455,89 +455,7 @@ for valid in valid_set:
 #print(pred_reg.shape , pred_obj.shape)
 
 
-for data in voc_train4:
-  pred_reg,pred_obj=rpn_model(data[0],training=False) 
-  break
 
-
-pred_reg.shape, pred_obj.shape
-
-pred_obj
-
-pred_reg2=tf.reshape(pred_reg,(5,31,31,9,4))
-
-pred_obj2=tf.reshape(pred_obj,(5,-1))
-
-pred_obj2.shape
-
-
-pred_obj2=tf.reshape(pred_obj,(5,-1))
-a,b=tf.math.top_k(pred_obj2,k=6000)
-
-# 역산 
-
-pred_obj2=tf.reshape(pred_obj,(5,-1))
-a,b=tf.math.top_k(pred_obj2,k=6000)
-candidate=tf.stack([(b//9)//31,(b//9)%31,b%9],axis=2)
-pred_value=inverse_trans(anchor_box,pred_reg)
-
-candidate_coord=tf.gather_nd(pred_value,indices=candidate,batch_dims=1)
-
-adjust_coord=tf.clip_by_value(candidate_coord,0,1)
-
-# 이 상태에서 NMS 알고리즘 적용
-
-# 지금 좌표는 (ymin,xmin,ymax,xmax) 로 구성되어있음. 
-adjust_coord=tf.expand_dims(adjust_coord,axis=2)
-conf_score=tf.expand_dims(a,axis=2)
-proposed,_,_,_=tf.image.combined_non_max_suppression(adjust_coord,conf_score,2000,2000,iou_threshold=0.7)
-
-
-proposed
-
-'''
-base_line=test[0]
-b_box=test[1:]
-iou_threshold=0.7
-def calculate_iou(base_line,b_box):
-  base_size=(base_line[2]-base_line[0])*(base_line[3]-base_line[1])
-  bbox_size=(b_box[:,2]-b_box[:,0])*(b_box[:,3]-b_box[:,1])
-    
-  xmin=tf.math.maximum(base_line[1],b_box[:,1])
-  ymin=tf.math.maximum(base_line[0],b_box[:,0])
-  xmax=tf.math.minimum(base_line[3],b_box[:,3])
-  ymax=tf.math.minimum(base_line[2],b_box[:,2])
-
-  intersection=(xmax-xmin)*(ymax-ymin)
-  intersection2=tf.where((xmax>xmin)&(ymax>ymin),intersection,0)
-  intersection3=tf.where(intersection2>0,intersection2,0)
-
-  union=base_size+bbox_size-intersection3
-  iou=intersection3/union 
-  
-  return iou
-
-temp=tf.zeros((0,4))  
-test[0].shape
-iou_list=calculate_iou(test[0],test)
-temp=tf.concat([temp,tf.expand_dims(test[0],axis=0)],axis=0)
-test=tf.gather_nd(test,indices=tf.where(iou_list<iou_threshold))
-test
-i=0
-
-def non_maximum_suppression(test):
-  temp=tf.zeros((0,4)) 
-  for i in tf.range(6000):
-    iou_list=calculate_iou(test[i],test)
-    temp=tf.concat([temp,tf.expand_dims(test[i],axis=0)],axis=0)
-    test=tf.gather_nd(test,indices=tf.where(iou_list<iou_threshold))
-    if tf.shape(test)[0]<=(tf.constant(2000)-tf.shape(temp)[0]):
-      required_num=tf.constant(2000)-tf.shape(temp)[0]
-      required_num=tf.clip_by_value(required_num,0,tf.shape(test)[0])
-      temp=tf.concat([temp,test[:required_num]],axis=0)
-      break
-  return temp
-'''
 
 ## FAST_RCNN Layer
 inputs=tf.keras.Input((2000,14,14,512),name='crop_image_interpolation')
