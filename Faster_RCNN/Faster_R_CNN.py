@@ -16,13 +16,15 @@ import neptune.new as neptune
 
 run = neptune.init(
     project="sungsu/Faster-R-CNN",
-    api_token="--",
+    api_token="eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiI1YTJmMGZiOC1jYzc0LTRkNTYtYWU1YS1jMGI0YmNmZDU4ZjgifQ==",
 )
 
 
 # Patch Data
 dataset,info=tfds.load("voc",with_info=True,split=["test","train+validation[0%:95%]","validation[95%:]"])
 info.features['labels'].names
+
+
 
 
 
@@ -546,8 +548,8 @@ layer4=tf.keras.layers.TimeDistributed(tf.keras.layers.Dropout(0.5),name='Dropou
 layer5=tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(4096,activation='relu'),name='fc2')(layer4)
 layer6=tf.keras.layers.TimeDistributed(tf.keras.layers.Dropout(0.5),name='Dropout2')(layer5)
 cls_layer=tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(21,activation='softmax',name='classifier'))(layer6)
-reg_layer=tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(4,activation='linear',name='bbox_correction'))(layer6)
-frcn_model=Model(inputs=inputs,outputs=[cls_layer,reg_layer],name='Faster_RCNN_Model')
+reg_layer=tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(21*4,activation='linear',name='bbox_correction'))(layer6)
+frcn_model=Model(inputs=inputs,outputs=[reg_layer,cls_layer],name='Faster_RCNN_Model')
 frcn_model.summary()
 
 
@@ -617,7 +619,9 @@ def making_frcnn_input(data):
   iou3=tf.gather_nd(iou2,indices=tf.expand_dims(tf.math.argmax(iou2,axis=2),axis=2),batch_dims=2)
   plabel=tf.gather_nd(label,indices=tf.expand_dims(tf.math.argmax(iou2,axis=2),axis=2),batch_dims=0)
   
-  p_iou=tf.where(iou3>=0.5,plabel,-1)
+  p_iou=tf.where(iou3>=0.5,plabel,20)
+  gt_mask=p_iou
+  gt_label=tf.one_hot(p_iou,depth=21)
   gt_box2=tf.reshape(gt_box,(-1,42,4))
   
   
@@ -633,16 +637,121 @@ def making_frcnn_input(data):
   
   offset=tf.stack([t_x_star,t_y_star,t_w_star,t_h_star],axis=2)
   
-  return crop_fmap, p_iou, offset
+  #crop_fmap=tf.reshape(crop_fmap,(2000,14,14,512))
+  #gt_label=tf.reshape(gt_label,(2000,21))  
+  #gt_mask=tf.reshape(gt_mask,(2000))
+  #offset=tf.reshape(offset,(2000,4))
+  return crop_fmap, gt_label, gt_mask,offset
 
 
 voc_train6=voc_train2.map(lambda data: making_frcnn_input(data))
+
+
 
 for i in voc_train6:
   data=i
   break
 
+data[0],data[1],data[2],data[3]
 
+epoch=100
+optimizer=tf.keras.optimizers.Adam(learning_rate=1e-5)
+anchor_box=make_anchor()
+train_loss_list=[10]
+valid_loss_list=[10]
+best_valid_loss_index=0
+revision_count=0
+loss_cls=tf.keras.losses.CategoricalCrossentropy()
+loss_bbr=Loss_bbr()
+
+voc_train6=voc_train2.map(lambda data: making_frcnn_input(data))
+voc_train7=voc_train6.batch(2).prefetch(2)
+
+voc_valid6=voc_valid2.map(lambda data: making_frcnn_input(data))
+voc_valid7=voc_valid6.batch(2).prefetch(2)
+
+for t1 in voc_train7:
+  t3=t1
+  break
+
+tf.squeeze(t3[0],axis=1)
+
+
+for epo in range(1,epoch+1):
+  print("Epoch {}/{}".format(epo,epoch))
+  train_total_loss=tf.constant(0,dtype=tf.float32)
+  valid_total_loss=tf.constant(0,dtype=tf.float32)
+
+  for data in tqdm(voc_train7):
+    # data : {RoI Fmap (B,2000,14,14,512), Label (B,2000,21), gt_mask (B,2000), gt_coord (B,2000,4)}
+    # Reg Mask Implement
+    fmap=tf.squeeze(data[0],axis=1)
+    label=tf.squeeze(data[1],axis=1)
+    gt_mask=tf.squeeze(data[2],axis=1)
+    gt_coord=tf.squeeze(data[3],axis=1)
+    
+    pos_index=tf.expand_dims(gt_mask,axis=2)
+    reg_mask=tf.where(pos_index==20,0,1)
+    reg_mask=tf.cast(tf.expand_dims(tf.reshape(reg_mask,(-1,2000)),axis=2),tf.float32)
+    gt_reg=tf.clip_by_value(gt_coord,-10,10)
+    with tf.GradientTape() as tape:
+      pred_reg,pred_obj=frcn_model(fmap,training=True)    # pred_reg = (B,2000,84) , pred_obj= (B,2000,21)
+      pred_reg=tf.reshape(pred_reg,(-1,2000,21,4))
+      reg1=tf.gather_nd(pred_reg,indices=pos_index,batch_dims=2)
+      pred_reg=reg1*reg_mask
+      gt_reg=gt_reg*reg_mask
+      
+      objectness_loss=loss_cls(label,pred_obj)  
+      bounding_box_loss=loss_bbr(gt_reg,pred_reg)
+      train_sub_loss=tf.add_n([objectness_loss]+[(bounding_box_loss)])  
+    
+    run["train/iter_loss"].log(train_sub_loss)
+    gradients=tape.gradient(train_sub_loss,frcn_model.trainable_variables)
+    optimizer.apply_gradients(zip(gradients,frcn_model.trainable_variables))
+    train_total_loss=tf.add(train_total_loss,train_sub_loss)
+  train_loss_list.append(tf.reduce_sum(train_total_loss)/2442)
+  run["train/epoch_loss"].log(tf.reduce_sum(train_total_loss)/2442)
+
+  for data in tqdm(voc_valid7):
+    fmap=tf.squeeze(data[0],axis=1)
+    label=tf.squeeze(data[1],axis=1)
+    gt_mask=tf.squeeze(data[2],axis=1)
+    gt_coord=tf.squeeze(data[3],axis=1)
+    pos_index=tf.expand_dims(gt_mask,axis=2)
+    reg_mask=tf.where(pos_index==20,0,1)
+    reg_mask=tf.cast(tf.expand_dims(tf.reshape(reg_mask,(-1,2000)),axis=2),tf.float32)
+    gt_reg=tf.clip_by_value(data[3],-10,10)
+    pred_reg_valid,pred_obj_valid=frcn_model(fmap,training=False)    # pred_reg = (B,2000,84) , pred_obj= (B,2000,21)
+    pred_reg_valid=tf.reshape(pred_reg_valid,(-1,2000,21,4))
+    reg1=tf.gather_nd(pred_reg_valid,indices=pos_index,batch_dims=2)
+    pred_reg_valid=reg1*reg_mask
+    gt_reg_valid=gt_reg_valid*reg_mask
+    
+    objectness_loss=loss_cls(label,pred_obj_valid)  
+    bounding_box_loss=loss_bbr(gt_reg_valid,pred_reg_valid)
+    valid_sub_loss=tf.add_n([objectness_loss]+[(bounding_box_loss)])
+    valid_total_loss=tf.add(valid_total_loss,valid_sub_loss)
+  
+  valid_loss_list.append(valid_total_loss/315)
+  run["valid/epoch_loss"].log(valid_total_loss/315)
+  
+  print("Train_Loss = {}, Valid_Loss={}, revision_count = {}".format(train_loss_list[epo],valid_loss_list[epo],revision_count))
+  if valid_loss_list[best_valid_loss_index]>valid_loss_list[epo]:
+    best_valid_loss_index=epo
+    revision_count=0
+    weight=frcn_model.get_weights()
+  else:
+    revision_count=revision_count+1
+  
+  if revision_count>=10:
+    break
+
+frcn_model.set_weights(weight)
+url=run.get_run_url().split('/')[-1]
+rpn_model.save_weights(f"./model/frcn_{url}.h5")
+run["model"].upload(f"./model/frcn_{url}.h5")
+
+run.stop()
 
 
 
