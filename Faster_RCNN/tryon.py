@@ -2,6 +2,16 @@
 # Faster RCNN Before Modularization
 
 # Library list
+'''
+import subprocess
+import sys
+
+try:
+    import neptune.new as neptune
+except:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "neptune-client"])
+    import neptune.new as neptune
+'''
 
 import tensorflow as tf
 from tensorflow.keras.applications.vgg16 import VGG16
@@ -23,7 +33,6 @@ run = neptune.init(
 # Patch Data
 dataset,info=tfds.load("voc",with_info=True,split=["test","train+validation[0%:95%]","validation[95%:]"])
 info.features['labels'].names
-
 
 
 voc_train,voc_test,voc_valid=dataset[1],dataset[0],dataset[2]
@@ -344,8 +353,8 @@ class Loss_bbr(tf.keras.losses.Loss):
     base_config=super().get_config()
     return {**base_config}
 
-
-
+rpn_model.load_weights("./model/rpn_FAS-8.h5")
+'''
 epoch=100
 optimizer=tf.keras.optimizers.Adam(learning_rate=1e-5)
 anchor_box=make_anchor()
@@ -444,7 +453,7 @@ rpn_model.load_weights(f"./model/rpn_{url}.h5")
 for valid in valid_set:
   valid_result(valid,iou=0.5,max_n=10)
 
-
+'''
 # ----------------------------------------------------------------------- #
 
 ## Implement NMS + ROI 풀링 ##
@@ -452,93 +461,8 @@ for valid in valid_set:
 #pred_reg,pred_obj
 #print(pred_reg.shape , pred_obj.shape)
 
-
-for data in voc_train4:
-  pred_reg,pred_obj=rpn_model(data[0],training=False) 
-  break
-
-
-pred_reg.shape, pred_obj.shape
-
-pred_obj
-
-pred_reg2=tf.reshape(pred_reg,(5,31,31,9,4))
-
-pred_obj2=tf.reshape(pred_obj,(5,-1))
-
-pred_obj2.shape
-
-
-pred_obj2=tf.reshape(pred_obj,(5,-1))
-a,b=tf.math.top_k(pred_obj2,k=6000)
-
-# 역산 
-
-pred_obj2=tf.reshape(pred_obj,(5,-1))
-a,b=tf.math.top_k(pred_obj2,k=6000)
-candidate=tf.stack([(b//9)//31,(b//9)%31,b%9],axis=2)
-pred_value=inverse_trans(anchor_box,pred_reg)
-
-candidate_coord=tf.gather_nd(pred_value,indices=candidate,batch_dims=1)
-
-adjust_coord=tf.clip_by_value(candidate_coord,0,1)
-
-# 이 상태에서 NMS 알고리즘 적용
-
-# 지금 좌표는 (ymin,xmin,ymax,xmax) 로 구성되어있음. 
-adjust_coord=tf.expand_dims(adjust_coord,axis=2)
-conf_score=tf.expand_dims(a,axis=2)
-proposed,_,_,_=tf.image.combined_non_max_suppression(adjust_coord,conf_score,2000,2000,iou_threshold=0.7)
-
-
-proposed
-
-'''
-base_line=test[0]
-b_box=test[1:]
-iou_threshold=0.7
-def calculate_iou(base_line,b_box):
-  base_size=(base_line[2]-base_line[0])*(base_line[3]-base_line[1])
-  bbox_size=(b_box[:,2]-b_box[:,0])*(b_box[:,3]-b_box[:,1])
-    
-  xmin=tf.math.maximum(base_line[1],b_box[:,1])
-  ymin=tf.math.maximum(base_line[0],b_box[:,0])
-  xmax=tf.math.minimum(base_line[3],b_box[:,3])
-  ymax=tf.math.minimum(base_line[2],b_box[:,2])
-
-  intersection=(xmax-xmin)*(ymax-ymin)
-  intersection2=tf.where((xmax>xmin)&(ymax>ymin),intersection,0)
-  intersection3=tf.where(intersection2>0,intersection2,0)
-
-  union=base_size+bbox_size-intersection3
-  iou=intersection3/union 
-  
-  return iou
-
-temp=tf.zeros((0,4))  
-test[0].shape
-iou_list=calculate_iou(test[0],test)
-temp=tf.concat([temp,tf.expand_dims(test[0],axis=0)],axis=0)
-test=tf.gather_nd(test,indices=tf.where(iou_list<iou_threshold))
-test
-i=0
-
-def non_maximum_suppression(test):
-  temp=tf.zeros((0,4)) 
-  for i in tf.range(6000):
-    iou_list=calculate_iou(test[i],test)
-    temp=tf.concat([temp,tf.expand_dims(test[i],axis=0)],axis=0)
-    test=tf.gather_nd(test,indices=tf.where(iou_list<iou_threshold))
-    if tf.shape(test)[0]<=(tf.constant(2000)-tf.shape(temp)[0]):
-      required_num=tf.constant(2000)-tf.shape(temp)[0]
-      required_num=tf.clip_by_value(required_num,0,tf.shape(test)[0])
-      temp=tf.concat([temp,test[:required_num]],axis=0)
-      break
-  return temp
-'''
-
 ## FAST_RCNN Layer
-inputs=tf.keras.Input((2000,14,14,512),name='crop_image_interpolation')
+inputs=tf.keras.Input((1500,14,14,512),name='crop_image_interpolation')
 layer1=tf.keras.layers.TimeDistributed(tf.keras.layers.MaxPool2D((2,2)),name='ROI_Pool')(inputs)
 layer2=tf.keras.layers.TimeDistributed(tf.keras.layers.Flatten(),name='Flatten')(layer1)
 layer3=tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(4096,activation='relu'),name='fc1')(layer2)
@@ -546,36 +470,17 @@ layer4=tf.keras.layers.TimeDistributed(tf.keras.layers.Dropout(0.5),name='Dropou
 layer5=tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(4096,activation='relu'),name='fc2')(layer4)
 layer6=tf.keras.layers.TimeDistributed(tf.keras.layers.Dropout(0.5),name='Dropout2')(layer5)
 cls_layer=tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(21,activation='softmax',name='classifier'))(layer6)
-reg_layer=tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(4,activation='linear',name='bbox_correction'))(layer6)
-frcn_model=Model(inputs=inputs,outputs=[cls_layer,reg_layer],name='Faster_RCNN_Model')
+reg_layer=tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(21*4,activation='linear',name='bbox_correction'))(layer6)
+frcn_model=Model(inputs=inputs,outputs=[reg_layer,cls_layer],name='Faster_RCNN_Model')
 frcn_model.summary()
 
-# 모델 출력 후, 제안 영역 좌표 만드는 함수.
-
-max_label=0
-max_gt=0
-for i in voc_train2:
-  if tf.shape(i['label'])[0]>max_label:
-    max_label=tf.shape(i['label'])[0]  
-  #if tf.shape(i['bbox'])[0]>max_gt:
-    #max_gt=tf.shape(i['bbox'])[0]
-max_label
-
-info
-
-
-voc_train5=voc_train2.batch(5).prefetch(5)
-
-for i in voc_train5:
-  data2=i
-  break
-
-rpn_model.summary()
+fmap_ext = tf.keras.Model(rpn_model.input, rpn_model.get_layer('conv2d').output)
 
 #define making_fast_rcnn_input
+'''
+@tf.function
 def making_frcnn_input(data):
   '''
-  
   input :
   data['image'] : image (B,500,500,3)
   data['bbox'] : ground_truth_box
@@ -594,9 +499,10 @@ def making_frcnn_input(data):
   gt_box=data['bbox']
   label=data['label']
      
-  pred_reg,pred_obj=rpn_model(img,training=False)
+  pred_reg,pred_obj=rpn_model(img)
   fmap_ext = tf.keras.Model(rpn_model.input, rpn_model.get_layer('conv2d').output)
   fmap=fmap_ext(img)
+  fmap
   pred_obj2=tf.reshape(pred_obj,(tf.shape(fmap)[0],-1))
   a,b=tf.math.top_k(pred_obj2,k=6000)
   candidate=tf.stack([(b//9)//31,(b//9)%31,b%9],axis=2)
@@ -605,17 +511,17 @@ def making_frcnn_input(data):
   adjust_coord=tf.clip_by_value(candidate_coord,0,1)
   adjust_coord=tf.expand_dims(adjust_coord,axis=2)
   conf_score=tf.expand_dims(a,axis=2)
-  proposed,_,_,_=tf.image.combined_non_max_suppression(adjust_coord,conf_score,2000,2000,iou_threshold=0.7)
+  proposed,_,_,_=tf.image.combined_non_max_suppression(adjust_coord,conf_score,300,300,iou_threshold=0.7)
   proposed2=tf.reshape(proposed,(-1,4))
-  box_indices = tf.repeat(tf.range(tf.shape(fmap)[0]),tf.repeat(tf.constant(2000),tf.shape(fmap)[0]))
+  box_indices = tf.repeat(tf.range(tf.shape(fmap)[0]),tf.repeat(tf.constant(300),tf.shape(fmap)[0]))
   c=tf.image.crop_and_resize(fmap,proposed2,box_indices,(14,14))
-  crop_fmap=tf.reshape(c,(-1,2000,14,14,512))
+  crop_fmap=tf.reshape(c,(-1,300,14,14,512))
 
   # Extract Corresponding label ang gtbox
   # data2['image']
   # proposed와 각 이미지마다 gt_box들간의 iou 계산해서 가장 높은 값을 라벨,
   # iou가 일정 수보다 낮다면, bg로 라벨. ex)0.5
-  # 
+
   gt_box=tf.reshape(gt_box,(-1,1,42,4))
   gt_box_size=(gt_box[:,:,:,2]-gt_box[:,:,:,0])*(gt_box[:,:,:,3]-gt_box[:,:,:,1])
   
@@ -638,7 +544,9 @@ def making_frcnn_input(data):
   iou3=tf.gather_nd(iou2,indices=tf.expand_dims(tf.math.argmax(iou2,axis=2),axis=2),batch_dims=2)
   plabel=tf.gather_nd(label,indices=tf.expand_dims(tf.math.argmax(iou2,axis=2),axis=2),batch_dims=0)
   
-  p_iou=tf.where(iou3>=0.5,plabel,-1)
+  p_iou=tf.where(iou3>=0.5,plabel,20)
+  gt_mask=p_iou
+  gt_label=tf.one_hot(p_iou,depth=21)
   gt_box2=tf.reshape(gt_box,(-1,42,4))
   
   
@@ -654,96 +562,177 @@ def making_frcnn_input(data):
   
   offset=tf.stack([t_x_star,t_y_star,t_w_star,t_h_star],axis=2)
   
-  return crop_fmap, p_iou, offset
+  #crop_fmap=tf.reshape(crop_fmap,(2000,14,14,512))
+  #gt_label=tf.reshape(gt_label,(2000,21))  
+  #gt_mask=tf.reshape(gt_mask,(2000))
+  #offset=tf.reshape(offset,(2000,4))
+  
+  return crop_fmap,gt_label,gt_mask,offset
+'''
 
 
-data=data2
-img=data['image']
-pred_reg,pred_obj=rpn_model(img,training=False)
+epoch=100
+optimizer=tf.keras.optimizers.Adam(learning_rate=1e-5)
+anchor_box=make_anchor()
+train_loss_list=[10]
+valid_loss_list=[10]
+best_valid_loss_index=0
+revision_count=0
+loss_cls=tf.keras.losses.CategoricalCrossentropy()
+loss_bbr=Loss_bbr()
+anchor_box=make_anchor()
 fmap_ext = tf.keras.Model(rpn_model.input, rpn_model.get_layer('conv2d').output)
-fmap=fmap_ext(img)
-pred_obj2=tf.reshape(pred_obj,(tf.shape(fmap)[0],-1))
-a,b=tf.math.top_k(pred_obj2,k=6000)
-candidate=tf.stack([(b//9)//31,(b//9)%31,b%9],axis=2)
-pred_value=inverse_trans(anchor_box,pred_reg)
-candidate_coord=tf.gather_nd(pred_value,indices=candidate,batch_dims=1)
-adjust_coord=tf.clip_by_value(candidate_coord,0,1)
-adjust_coord=tf.expand_dims(adjust_coord,axis=2)
-conf_score=tf.expand_dims(a,axis=2)
-proposed,_,_,_=tf.image.combined_non_max_suppression(adjust_coord,conf_score,2000,2000,iou_threshold=0.7)
-proposed2=tf.reshape(proposed,(-1,4))
-box_indices = tf.repeat(tf.range(tf.shape(fmap)[0]),(2000,2000,2000,2000,2000))
-c=tf.image.crop_and_resize(fmap,proposed2,box_indices,(14,14))
-c2=tf.reshape(c,(-1,2000,14,14,512))
 
-adjust_coord
+voc_train3=voc_train2.batch(2).prefetch(2)
+voc_valid3=voc_valid2.batch(2).prefetch(2)
 
+for i in voc_train3:
+    data=i
+    break
 
-voc_train6=voc_train2.map(lambda data: making_frcnn_input(data))
-
-for i in voc_train6:
-  data=i
-  break
-
-
-tf.where(data[3]>0)
-
-
-data[1]
-
-data[1]
-
-
-pred_a
+data
+img=data['image']
 gt_box=data['bbox']
-# (5,42,4)
-gt_box=tf.reshape(gt_box,(5,1,42,4))
-gt_box_size=(gt_box[:,:,:,2]-gt_box[:,:,:,0])*(gt_box[:,:,:,3]-gt_box[:,:,:,1])
-# (5,42)
-
-gt_box
-
-tf.expand_dims(gt_box,axis=2)
-
-ac=adjust_coord # (5,6000,1,4)
-#ac=tf.reshape(ac,(5,6000,4))
-ac_size=(ac[:,:,:,2]-ac[:,:,:,0])*(ac[:,:,:,3]-ac[:,:,:,1])
-
-xmin=tf.math.maximum(ac[:,:,:,1],gt_box[:,:,:,1])
-ymin=tf.math.maximum(ac[:,:,:,0],gt_box[:,:,:,0])
-xmax=tf.math.minimum(ac[:,:,:,3],gt_box[:,:,:,3])
-ymax=tf.math.minimum(ac[:,:,:,2],gt_box[:,:,:,2])
-
-intersection=(xmax-xmin)*(ymax-ymin)
-intersection2=tf.where((xmax>xmin)&(ymax>ymin),intersection,0)
-intersection3=tf.where(intersection2>0,intersection2,0)
-
-union=gt_box_size+ac_size-intersection3
-iou=intersection3/union
-
-iou2=tf.where(iou>=0.5,iou,0)
-iou2
-
-iou3=tf.gather_nd(iou2,indices=tf.expand_dims(tf.math.argmax(iou2,axis=2),axis=2),batch_dims=2)
 label=data['label']
-tf.gather
-# label size : 5,42
-plabel=tf.gather_nd(label,indices=tf.expand_dims(tf.math.argmax(iou2,axis=2),axis=2),batch_dims=1)
-# size : 5,6000
-p_iou=tf.where(iou3>=0.5,plabel,-1)
-gt_box2=tf.reshape(gt_box,(5,42,4))
-p_coord=tf.gather_nd(gt_box2,indices=tf.expand_dims(tf.math.argmax(iou2,axis=2),axis=2),batch_dims=1)
+
+def making_frcnn_input(data):
+  img=data['image']
+  gt_box=data['bbox']
+  label=data['label']
+  pred_reg,pred_obj=rpn_model(img)
+  fmap=fmap_ext(img)
+  pred_obj2=tf.reshape(pred_obj,(tf.shape(fmap)[0],-1))
+  a,b=tf.math.top_k(pred_obj2,k=6000)
+  candidate=tf.stack([(b//9)//31,(b//9)%31,b%9],axis=2)
+  pred_value=inverse_trans(anchor_box,pred_reg)
+  candidate_coord=tf.gather_nd(pred_value,indices=candidate,batch_dims=1)
+  adjust_coord=tf.clip_by_value(candidate_coord,0,1)
+  adjust_coord=tf.expand_dims(adjust_coord,axis=2)
+  conf_score=tf.expand_dims(a,axis=2)
+  proposed,_,_,_=tf.image.combined_non_max_suppression(adjust_coord,conf_score,1500,1500,iou_threshold=0.7)
+  proposed2=tf.reshape(proposed,(-1,4))
+  box_indices = tf.repeat(tf.range(tf.shape(fmap)[0]),tf.repeat(tf.constant(1500),tf.shape(fmap)[0]))
+  c=tf.image.crop_and_resize(fmap,proposed2,box_indices,(14,14))
+  crop_fmap=tf.reshape(c,(-1,1500,14,14,512))
+
+  gt_box=tf.reshape(gt_box,(-1,1,42,4))
+  gt_box_size=(gt_box[:,:,:,2]-gt_box[:,:,:,0])*(gt_box[:,:,:,3]-gt_box[:,:,:,1])
+
+  ac=tf.expand_dims(proposed,axis=2)
+  ac_size=(ac[:,:,:,2]-ac[:,:,:,0])*(ac[:,:,:,3]-ac[:,:,:,1])
+
+  xmin=tf.math.maximum(ac[:,:,:,1],gt_box[:,:,:,1])
+  ymin=tf.math.maximum(ac[:,:,:,0],gt_box[:,:,:,0])
+  xmax=tf.math.minimum(ac[:,:,:,3],gt_box[:,:,:,3])
+  ymax=tf.math.minimum(ac[:,:,:,2],gt_box[:,:,:,2])
+
+  intersection=(xmax-xmin)*(ymax-ymin)
+  intersection2=tf.where((xmax>xmin)&(ymax>ymin),intersection,0)
+  intersection3=tf.where(intersection2>0,intersection2,0)
+
+  union=gt_box_size+ac_size-intersection3
+  iou=intersection3/union
+  iou2=tf.where(iou>=0.5,iou,0)
+
+  iou3=tf.gather_nd(iou2,indices=tf.expand_dims(tf.math.argmax(iou2,axis=2),axis=2),batch_dims=2)
+  plabel=tf.gather_nd(label,indices=tf.expand_dims(tf.math.argmax(iou2,axis=2),axis=2),batch_dims=1)
 
 
-p_coord.shape
+  p_iou=tf.where(iou3>=0.5,plabel,20)
+  gt_mask=p_iou
+  gt_label=tf.one_hot(p_iou,depth=21)
+  gt_box2=tf.reshape(gt_box,(-1,42,4))
 
-w_a=batch_anchor[:,3]-batch_anchor[:,1]
-h_a=batch_anchor[:,2]-batch_anchor[:,0]
-t_x_star=(batch_gt[:,1]-batch_anchor[:,1])/w_a
-t_y_star=(batch_gt[:,0]-batch_anchor[:,0])/h_a
-t_w_star=tf.math.log((batch_gt[:,3]-batch_gt[:,1])/w_a)
-t_h_star=tf.math.log((batch_gt[:,2]-batch_gt[:,0])/h_a)
-batch_reg_gt=tf.stack([t_x_star,t_y_star,t_w_star,t_h_star],axis=1)
+  p_coord=tf.gather_nd(gt_box2,indices=tf.expand_dims(tf.math.argmax(iou2,axis=2),axis=2),batch_dims=1)
+
+  # Transform gtbox coord to offset
+  w_a=proposed[:,:,3]-proposed[:,:,1]
+  h_a=proposed[:,:,2]-proposed[:,:,0]
+  t_x_star=(p_coord[:,:,1]-proposed[:,:,1])/w_a
+  t_y_star=(p_coord[:,:,0]-proposed[:,:,0])/h_a
+  t_w_star=tf.math.log((p_coord[:,:,3]-p_coord[:,:,1])/w_a)
+  t_h_star=tf.math.log((p_coord[:,:,2]-p_coord[:,:,0])/h_a)
+
+  gt_coord=tf.stack([t_x_star,t_y_star,t_w_star,t_h_star],axis=2)
+
+  return crop_fmap,gt_label,gt_mask,gt_coord
+
+
+
+
+for epo in range(1,epoch+1):
+  print("Epoch {}/{}".format(epo,epoch))
+  train_total_loss=tf.constant(0,dtype=tf.float32)
+  valid_total_loss=tf.constant(0,dtype=tf.float32)
+
+  for data in tqdm(voc_train3):
+    # data : {RoI Fmap (B,2000,14,14,512), Label (B,2000,21), gt_mask (B,2000), gt_coord (B,2000,4)}
+    # Reg Mask Implement
+    fmap,label,gt_mask,gt_coord=making_frcnn_input(data)
+    
+    pos_index=tf.expand_dims(gt_mask,axis=2)
+    reg_mask=tf.where(pos_index==20,0,1)
+    reg_mask=tf.cast(tf.expand_dims(tf.reshape(reg_mask,(-1,1500)),axis=2),tf.float32)
+    gt_reg=tf.clip_by_value(gt_coord,-10,10)
+    with tf.GradientTape() as tape:
+      pred_reg,pred_obj=frcn_model(fmap,training=True)    # pred_reg = (B,2000,84) , pred_obj= (B,2000,21)
+      pred_reg=tf.reshape(pred_reg,(-1,1500,21,4))
+      reg1=tf.gather_nd(pred_reg,indices=pos_index,batch_dims=2)
+      pred_reg=reg1*reg_mask
+      gt_reg=gt_reg*reg_mask
+      
+      objectness_loss=loss_cls(label,pred_obj)  
+      bounding_box_loss=loss_bbr(gt_reg,pred_reg)
+      train_sub_loss=tf.add_n([objectness_loss]+[(bounding_box_loss)])  
+    
+    run["train/iter_loss"].log(train_sub_loss)
+    gradients=tape.gradient(train_sub_loss,frcn_model.trainable_variables)
+    optimizer.apply_gradients(zip(gradients,frcn_model.trainable_variables))
+    train_total_loss=tf.add(train_total_loss,train_sub_loss)
+  train_loss_list.append(tf.reduce_sum(train_total_loss)/2443) #2442
+  run["train/epoch_loss"].log(tf.reduce_sum(train_total_loss)/2443)
+
+  for data in tqdm(voc_valid3):
+    fmap,label,gt_mask,gt_coord=making_frcnn_input(data)
+    
+    pos_index=tf.expand_dims(gt_mask,axis=2)
+    reg_mask=tf.where(pos_index==20,0,1)
+    reg_mask=tf.cast(tf.expand_dims(tf.reshape(reg_mask,(-1,1500)),axis=2),tf.float32)
+    gt_reg=tf.clip_by_value(data[3],-10,10)
+    pred_reg_valid,pred_obj_valid=frcn_model(fmap,training=False)    # pred_reg = (B,2000,84) , pred_obj= (B,2000,21)
+    pred_reg_valid=tf.reshape(pred_reg_valid,(-1,1500,21,4))
+    reg1=tf.gather_nd(pred_reg_valid,indices=pos_index,batch_dims=2)
+    pred_reg_valid=reg1*reg_mask
+    gt_reg_valid=gt_reg_valid*reg_mask
+    
+    objectness_loss=loss_cls(label,pred_obj_valid)  
+    bounding_box_loss=loss_bbr(gt_reg_valid,pred_reg_valid)
+    valid_sub_loss=tf.add_n([objectness_loss]+[(bounding_box_loss)])
+    valid_total_loss=tf.add(valid_total_loss,valid_sub_loss)
+  
+  valid_loss_list.append(valid_total_loss/315) #315
+  run["valid/epoch_loss"].log(valid_total_loss/315)
+  
+  print("Train_Loss = {}, Valid_Loss={}, revision_count = {}".format(train_loss_list[epo],valid_loss_list[epo],revision_count))
+  if valid_loss_list[best_valid_loss_index]>valid_loss_list[epo]:
+    best_valid_loss_index=epo
+    revision_count=0
+    weight=frcn_model.get_weights()
+  else:
+    revision_count=revision_count+1
+  
+  if revision_count>=10:
+    break
+
+frcn_model.set_weights(weight)
+url=run.get_run_url().split('/')[-1]
+rpn_model.save_weights(f"./model/frcn_{url}.h5")
+run["model"].upload(f"./model/frcn_{url}.h5")
+
+run.stop()
+
+
+
 
 
 
