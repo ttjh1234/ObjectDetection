@@ -601,7 +601,7 @@ for epo in range(1,epoch+1):
         pos_index=tf.expand_dims(gt_mask,axis=2)
         reg_mask=tf.where(pos_index==20,0,1)
         reg_mask=tf.cast(tf.expand_dims(tf.reshape(reg_mask,(-1,1500)),axis=2),tf.float32)
-        gt_reg=tf.clip_by_value(data[3],-10,10)
+        gt_reg_valid=tf.clip_by_value(gt_coord,-10,10)
         pred_reg_valid,pred_obj_valid=frcn_model(fmap,training=False)    # pred_reg = (B,2000,84) , pred_obj= (B,2000,21)
         pred_reg_valid=tf.reshape(pred_reg_valid,(-1,1500,21,4))
         reg1=tf.gather_nd(pred_reg_valid,indices=pos_index,batch_dims=2)
@@ -633,7 +633,6 @@ rpn_model.save_weights(f"./model/frcn_{url}.h5")
 run["model"].upload(f"./model/frcn_{url}.h5")
 
 run.stop()
-
 
 
 
