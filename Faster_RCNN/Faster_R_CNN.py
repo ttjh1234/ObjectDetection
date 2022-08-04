@@ -634,21 +634,4 @@ frcn_model.save_weights(f"./model/frcn_{url}.h5")
 run["model"].upload(f"./model/frcn_{url}.h5")
 
 run.stop()
-'''
-run = neptune.init(
-    project="sungsu/Faster-R-CNN",
-    api_token="eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiI1YTJmMGZiOC1jYzc0LTRkNTYtYWU1YS1jMGI0YmNmZDU4ZjgifQ==",
-    run='FAS-19'
-)
 
-run["model"].download()
-
-print(os.getcwd())
-
-os.listdir()
-
-tf.keras.models.load_model('model.h5')
-
-frcn_model.load_weights('model.h5')
-
-'''
