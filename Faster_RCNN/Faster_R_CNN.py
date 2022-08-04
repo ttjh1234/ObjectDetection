@@ -490,15 +490,6 @@ fmap_ext = tf.keras.Model(rpn_model.input, rpn_model.get_layer('conv2d').output)
 voc_train3=voc_train2.batch(2).prefetch(2)
 voc_valid3=voc_valid2.batch(2).prefetch(2)
 
-for i in voc_train3:
-    data=i
-    break
-
-data
-img=data['image']
-gt_box=data['bbox']
-label=data['label']
-
 def making_frcnn_input(data):
     img=data['image']
     gt_box=data['bbox']
@@ -614,7 +605,7 @@ for epo in range(1,epoch+1):
         valid_sub_loss=tf.add_n([objectness_loss]+[(bounding_box_loss)])
         valid_total_loss=tf.add(valid_total_loss,valid_sub_loss)
     
-    valid_loss_list.append(valid_total_loss/315) #315
+    valid_loss_list.append(valid_total_loss/63) #315
     run["valid/epoch_loss"].log(valid_total_loss/315)
     
     print("Train_Loss = {}, Valid_Loss={}, revision_count = {}".format(train_loss_list[epo],valid_loss_list[epo],revision_count))
