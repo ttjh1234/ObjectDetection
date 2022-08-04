@@ -606,7 +606,7 @@ for epo in range(1,epoch+1):
         valid_total_loss=tf.add(valid_total_loss,valid_sub_loss)
     
     valid_loss_list.append(valid_total_loss/63) #315
-    run["valid/epoch_loss"].log(valid_total_loss/315)
+    run["valid/epoch_loss"].log(valid_total_loss/63)
     
     print("Train_Loss = {}, Valid_Loss={}, revision_count = {}".format(train_loss_list[epo],valid_loss_list[epo],revision_count))
     if valid_loss_list[best_valid_loss_index]>valid_loss_list[epo]:
