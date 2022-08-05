@@ -25,6 +25,9 @@ from tqdm import tqdm
 import os
 import neptune.new as neptune
 
+#from tensorflow.python.client import device_lib
+#device_lib.list_local_devices()
+
 run = neptune.init(
     project="sungsu/Faster-R-CNN",
     api_token="eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiI1YTJmMGZiOC1jYzc0LTRkNTYtYWU1YS1jMGI0YmNmZDU4ZjgifQ==",
@@ -32,6 +35,7 @@ run = neptune.init(
 
 
 # Patch Data
+
 dataset,info=tfds.load("voc",with_info=True,split=["test","train+validation[0%:95%]","validation[95%:]"])
 info.features['labels'].names
 
