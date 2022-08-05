@@ -27,7 +27,7 @@ import neptune.new as neptune
 
 run = neptune.init(
     project="sungsu/Faster-R-CNN",
-    api_token="--",
+    api_token="eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiI1YTJmMGZiOC1jYzc0LTRkNTYtYWU1YS1jMGI0YmNmZDU4ZjgifQ==",
 )
 
 
@@ -550,7 +550,7 @@ def making_frcnn_input(data):
 
     gt_coord=tf.stack([t_x_star,t_y_star,t_w_star,t_h_star],axis=2)
 
-    return crop_fmap,gt_label,gt_mask,gt_coord
+    return crop_fmap,gt_label,gt_mask,gt_coord,proposed
 
 
 
@@ -563,7 +563,7 @@ for epo in range(1,epoch+1):
     for data in tqdm(voc_train3):
       # data : {RoI Fmap (B,2000,14,14,512), Label (B,2000,21), gt_mask (B,2000), gt_coord (B,2000,4)}
       # Reg Mask Implement
-        fmap,label,gt_mask,gt_coord=making_frcnn_input(data)
+        fmap,label,gt_mask,gt_coord,_=making_frcnn_input(data)
         
         pos_index=tf.expand_dims(gt_mask,axis=2)
         reg_mask=tf.where(pos_index==20,0,1)
@@ -584,11 +584,11 @@ for epo in range(1,epoch+1):
         gradients=tape.gradient(train_sub_loss,frcn_model.trainable_variables)
         optimizer.apply_gradients(zip(gradients,frcn_model.trainable_variables))
         train_total_loss=tf.add(train_total_loss,train_sub_loss)
-    train_loss_list.append(tf.reduce_sum(train_total_loss)/2443) #2442
+    train_loss_list.append(tf.reduce_sum(train_total_loss)/2443) 
     run["train/epoch_loss"].log(tf.reduce_sum(train_total_loss)/2443)
 
     for data in tqdm(voc_valid3):
-        fmap,label,gt_mask,gt_coord=making_frcnn_input(data)
+        fmap,label,gt_mask,gt_coord,_=making_frcnn_input(data)
         
         pos_index=tf.expand_dims(gt_mask,axis=2)
         reg_mask=tf.where(pos_index==20,0,1)
@@ -605,7 +605,7 @@ for epo in range(1,epoch+1):
         valid_sub_loss=tf.add_n([objectness_loss]+[(bounding_box_loss)])
         valid_total_loss=tf.add(valid_total_loss,valid_sub_loss)
     
-    valid_loss_list.append(valid_total_loss/63) #315
+    valid_loss_list.append(valid_total_loss/63) 
     run["valid/epoch_loss"].log(valid_total_loss/63)
     
     print("Train_Loss = {}, Valid_Loss={}, revision_count = {}".format(train_loss_list[epo],valid_loss_list[epo],revision_count))
@@ -625,4 +625,61 @@ frcn_model.save_weights(f"./model/frcn_{url}.h5")
 run["model"].upload(f"./model/frcn_{url}.h5")
 
 run.stop()
+
+os.getcwd()
+
+frcn_model.load_weights('./model/frcn_FAS-23.h5')
+
+for data in voc_valid3:
+    test=data
+    break
+
+def generate_coord(proposed,pred_reg):
+    pred_reg2=tf.reshape(pred_reg,(-1,1500,21,4))
+    # offset을 원래 ymin,xmin,ymax,xmax로 변환
+    cal_anc=tf.expand_dims(proposed,axis=2)
+    w_a=cal_anc[:,:,:,3]-cal_anc[:,:,:,1]
+    h_a=cal_anc[:,:,:,2]-cal_anc[:,:,:,0]  
+    x=pred_reg2[:,:,:,0]*w_a+cal_anc[:,:,:,0]
+    y=pred_reg2[:,:,:,1]*h_a+cal_anc[:,:,:,1]
+    w=tf.math.exp(pred_reg2[:,:,:,2])*w_a
+    h=tf.math.exp(pred_reg2[:,:,:,3])*h_a
+    x_max=x+w
+    y_max=y+h
+    y=tf.clip_by_value(y,0,1)
+    x=tf.clip_by_value(x,0,1)
+    y_max=tf.clip_by_value(y_max,0,1)
+    x_max=tf.clip_by_value(x_max,0,1)
+    pred_value=tf.stack([y,x,y_max,x_max],axis=3)
+    return pred_value
+
+
+fmap,label,gt_mask,gt_coord,proposed=making_frcnn_input(test)
+
+pos_index=tf.expand_dims(gt_mask,axis=2)
+reg_mask=tf.where(pos_index==20,0,1)
+reg_mask=tf.cast(tf.expand_dims(tf.reshape(reg_mask,(-1,1500)),axis=2),tf.float32)
+gt_reg_valid=tf.clip_by_value(gt_coord,-10,10)
+pred_reg_valid,pred_obj_valid=frcn_model(fmap,training=False)    # pred_reg = (B,2000,84) , pred_obj= (B,2000,21)
+
+# 모형에서 출력하는 바운딩박스 오프셋을 좌표공간으로 매핑
+result=generate_coord(proposed,pred_reg_valid)
+
+# nms 후 visualization
+# nms는 pred_obj를 기준으로 가장 높은 index를 취함
+# 20번 인덱스 (bg) 인 경우 제거하고 나머지 있는 애들 중에서 출력
+
+argindex=tf.math.argmax(pred_obj_valid,axis=2)
+
+bbox=tf.gather_nd(result,indices=tf.expand_dims(argindex,axis=2),batch_dims=2)
+
+bbox2=tf.where(tf.expand_dims(argindex,axis=2)!=20,bbox,0)
+
+tf.math.count_nonzero(bbox2)
+
+
+
+
+
+
 
