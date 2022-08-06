@@ -25,9 +25,6 @@ from tqdm import tqdm
 import os
 import neptune.new as neptune
 
-#from tensorflow.python.client import device_lib
-#device_lib.list_local_devices()
-
 run = neptune.init(
     project="sungsu/Faster-R-CNN",
     api_token="eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiI1YTJmMGZiOC1jYzc0LTRkNTYtYWU1YS1jMGI0YmNmZDU4ZjgifQ==",
@@ -256,7 +253,6 @@ def patch_batch(data,anchor_box):
     positive_ind=tf.stack([(positive_index[:,0]//9)//31,(positive_index[:,0]//9)%31,positive_index[:,0]%9,iou_positive[:,1]],axis=1)
     negative_ind=tf.stack([(negative_index[:,0]//9)//31,(negative_index[:,0]//9)%31,negative_index[:,0]%9,iou_negative[:,1]],axis=1)
 
-    # 여기부분 조건문만 바꾸면 해결 가능할 것 같다.
     pindex=tf.random.shuffle(positive_ind,name='positive_shuffle')[:nop2]
     pdata=tf.gather_nd(anchor,indices=[tf.stack([pindex[:,0],pindex[:,1],pindex[:,2]],axis=1)])
     pdata=tf.reshape(pdata,(-1,4))
@@ -538,6 +534,7 @@ def making_frcnn_input(data):
 
 
     p_iou=tf.where(iou3>=0.5,plabel,20)
+    
     gt_mask=p_iou
     gt_label=tf.one_hot(p_iou,depth=21)
     gt_box2=tf.reshape(gt_box,(-1,42,4))
@@ -557,8 +554,6 @@ def making_frcnn_input(data):
     return crop_fmap,gt_label,gt_mask,gt_coord,proposed
 
 
-
-
 for epo in range(1,epoch+1):
     print("Epoch {}/{}".format(epo,epoch))
     train_total_loss=tf.constant(0,dtype=tf.float32)
@@ -573,12 +568,19 @@ for epo in range(1,epoch+1):
         reg_mask=tf.where(pos_index==20,0,1)
         reg_mask=tf.cast(tf.expand_dims(tf.reshape(reg_mask,(-1,1500)),axis=2),tf.float32)
         gt_reg=tf.clip_by_value(gt_coord,-10,10)
+        
+        tf.where(pos_index!=20)
+        # 128개 중 32개만 positive sample, o.w bg
         with tf.GradientTape() as tape:
-            pred_reg,pred_obj=frcn_model(fmap,training=True)    # pred_reg = (B,2000,84) , pred_obj= (B,2000,21)
+            pred_reg,pred_obj=frcn_model(fmap,training=False)    # pred_reg = (B,2000,84) , pred_obj= (B,2000,21)
             pred_reg=tf.reshape(pred_reg,(-1,1500,21,4))
             reg1=tf.gather_nd(pred_reg,indices=pos_index,batch_dims=2)
             pred_reg=reg1*reg_mask
             gt_reg=gt_reg*reg_mask
+            
+            pred_reg
+            gt_reg
+            fmap.shape
             
             objectness_loss=loss_cls(label,pred_obj)  
             bounding_box_loss=loss_bbr(gt_reg,pred_reg)
@@ -630,7 +632,8 @@ run["model"].upload(f"./model/frcn_{url}.h5")
 
 run.stop()
 
-os.getcwd()
+
+'''
 
 frcn_model.load_weights('./model/frcn_FAS-23.h5')
 
@@ -658,6 +661,15 @@ def generate_coord(proposed,pred_reg):
     return pred_value
 
 
+
+voc_valid4=voc_valid2.batch(1).prefetch(1)
+
+
+for n,data in enumerate(voc_train4):
+    if n==3:
+        test=data
+        break
+
 fmap,label,gt_mask,gt_coord,proposed=making_frcnn_input(test)
 
 pos_index=tf.expand_dims(gt_mask,axis=2)
@@ -677,13 +689,40 @@ argindex=tf.math.argmax(pred_obj_valid,axis=2)
 
 bbox=tf.gather_nd(result,indices=tf.expand_dims(argindex,axis=2),batch_dims=2)
 
-bbox2=tf.where(tf.expand_dims(argindex,axis=2)!=20,bbox,0)
+#bbox2=tf.where(tf.expand_dims(argindex,axis=2)!=20,bbox,0)
 
-tf.math.count_nonzero(bbox2)
+pred_obj=tf.gather_nd(pred_obj_valid,indices=tf.expand_dims(argindex,axis=2),batch_dims=2)
+bgind=tf.where(argindex!=20)
+
+score=tf.gather_nd(pred_obj,indices=bgind)
+
+coord=tf.gather_nd(bbox,indices=bgind)
+
+proposed=tf.image.non_max_suppression(coord,score,100,iou_threshold=1.0)
+v_pdata = tf.gather(coord, proposed)
 
 
 
+vision_valid(tf.reshape(test['image'],(500,500,3)),v_pdata)
+
+pred_obj_valid.shape
+
+argindex
 
 
+pred_obj_valid
 
+test
 
+t1=bbox[0]
+
+proposed_box=tf.image.non_max_suppression(t1,pred_obj[0],100,iou_threshold=0.1)
+
+for i,j,k in zip(bbox2,pred_obj,test['image']):    
+    proposed_box=tf.image.non_max_suppression(i,j,100,iou_threshold=0.1)
+    print(proposed_box)
+    v_pdata = tf.gather(i, proposed_box)
+    print(v_pdata)
+    #vision_valid(k,v_pdata)
+
+'''
