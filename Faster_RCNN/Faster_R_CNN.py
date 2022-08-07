@@ -665,14 +665,14 @@ for epo in range(1,epoch+1):
         cal_pos=tf.expand_dims(cal_pos,axis=2)
         tindex=tf.expand_dims(tindex,axis=2)
         reg_mask=tf.cast(tf.expand_dims(gt_mask,axis=2),dtype=tf.float32)
-        gt_reg=tf.clip_by_value(gt_coord,-10,10)
+        gt_reg_valid=tf.clip_by_value(gt_coord,-10,10)
             
         pred_reg_valid,pred_obj_valid=frcn_model(fmap,training=False)    # pred_reg = (B,2000,84) , pred_obj= (B,2000,21)
         pred_reg_valid=tf.reshape(pred_reg_valid,(-1,1500,21,4))
         reg1=tf.gather_nd(pred_reg_valid,indices=tindex,batch_dims=1)
         reg2=tf.gather_nd(reg1,indices=cal_pos,batch_dims=2)
         pred_reg_valid=reg2*reg_mask
-        gt_reg_valid=gt_coord*reg_mask
+        gt_reg_valid=gt_reg_valid*reg_mask
         
         obj1=tf.gather_nd(pred_obj_valid,indices=tindex,batch_dims=1)
         
