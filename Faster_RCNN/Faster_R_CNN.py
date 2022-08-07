@@ -477,7 +477,6 @@ frcn_model.summary()
 
 epoch=100
 optimizer=tf.keras.optimizers.Adam(learning_rate=1e-5)
-anchor_box=make_anchor()
 train_loss_list=[10]
 valid_loss_list=[10]
 best_valid_loss_index=0
@@ -507,8 +506,8 @@ def making_frcnn_input(data):
     proposed,_,_,_=tf.image.combined_non_max_suppression(adjust_coord,conf_score,1500,1500,iou_threshold=0.7)
     proposed2=tf.reshape(proposed,(-1,4))
     box_indices = tf.repeat(tf.range(tf.shape(fmap)[0]),tf.repeat(tf.constant(1500),tf.shape(fmap)[0]))
-    c=tf.image.crop_and_resize(fmap,proposed2,box_indices,(14,14))
-    crop_fmap=tf.reshape(c,(-1,1500,14,14,512))
+    crop_fmap=tf.image.crop_and_resize(fmap,proposed2,box_indices,(14,14))
+    crop_fmap=tf.reshape(crop_fmap,(-1,1500,14,14,512))
 
     gt_box=tf.reshape(gt_box,(-1,1,42,4))
     gt_box_size=(gt_box[:,:,:,2]-gt_box[:,:,:,0])*(gt_box[:,:,:,3]-gt_box[:,:,:,1])
@@ -535,7 +534,7 @@ def making_frcnn_input(data):
 
     p_iou=tf.where(iou3>=0.5,plabel,20)
     
-    gt_mask=p_iou
+    gt_mask=tf.where(p_iou!=20,1,0)
     gt_label=tf.one_hot(p_iou,depth=21)
     gt_box2=tf.reshape(gt_box,(-1,42,4))
 
@@ -551,7 +550,74 @@ def making_frcnn_input(data):
 
     gt_coord=tf.stack([t_x_star,t_y_star,t_w_star,t_h_star],axis=2)
 
-    return crop_fmap,gt_label,gt_mask,gt_coord,proposed
+    # RPN Train 과 비슷하게, positive 128, negative 128개 추출
+    # P가 128개보다 작을 경우, N으로 채워넣음.
+    # P인 경우만 Reg Loss 계산, 나머지 256개는 전부다 Classifier Loss 계산
+    # 현재, BG인 경우와 FG인 경우 식별 가능한 변수 => 
+    
+    if tf.shape(crop_fmap)[0]==2:
+        for n,i in enumerate(p_iou):
+            i=tf.expand_dims(i,axis=0)
+            positive_index=tf.where(i!=20)
+            positive_pos=tf.where(i!=20,1,0)
+            negative_index=tf.where(i==20)
+            
+            nop=tf.clip_by_value(tf.reduce_sum(positive_pos),0,128)    
+            non=tf.constant(256,dtype=tf.int32)-nop
+            pindex=tf.random.shuffle(positive_index,name='positive_shuffle')[:nop]
+            nindex=tf.random.shuffle(negative_index,name='negative_shuffle')[:non]
+                        
+            if tf.equal(n,tf.constant(0)):
+                tindex=tf.concat([pindex,nindex],axis=0)
+                tindex=tf.random.shuffle(tindex,name='total_shuffle')
+                gt_label2=tf.expand_dims(tf.gather_nd(gt_label,indices=tindex),axis=0)
+                gt_coord2=tf.expand_dims(tf.gather_nd(gt_coord,indices=tindex),axis=0)
+                proposed2=tf.expand_dims(tf.gather_nd(proposed,indices=tindex),axis=0)
+                gt_mask2=tf.expand_dims(tf.gather_nd(gt_mask,indices=tindex),axis=0)
+            else:
+                temp_tindex=tf.concat([pindex,nindex],axis=0)
+                temp_tindex=tf.random.shuffle(temp_tindex,name='total_shuffle')
+                temp_label2=tf.expand_dims(tf.gather_nd(gt_label,indices=temp_tindex),axis=0)
+                temp_coord2=tf.expand_dims(tf.gather_nd(gt_coord,indices=temp_tindex),axis=0)
+                temp_proposed2=tf.expand_dims(tf.gather_nd(proposed,indices=temp_tindex),axis=0)
+                temp_gt_mask2=tf.expand_dims(tf.gather_nd(gt_mask,indices=temp_tindex),axis=0)
+                
+                gt_label2=tf.concat([gt_label2,temp_label2],axis=0)
+                gt_coord2=tf.concat([gt_coord2,temp_coord2],axis=0)
+                proposed2=tf.concat([proposed2,temp_proposed2],axis=0)    
+                gt_mask2=tf.concat([gt_mask2,temp_gt_mask2],axis=0)
+                tindex=tf.concat([tf.expand_dims(tindex[:,1],axis=0),tf.expand_dims(temp_tindex[:,1],axis=0)],axis=0)
+    else:
+        positive_index=tf.where(p_iou!=20)
+        positive_pos=tf.where(p_iou!=20,1,0)
+        negative_index=tf.where(p_iou==20)
+        
+        nop=tf.clip_by_value(tf.reduce_sum(positive_pos),0,128)    
+        non=tf.constant(256,dtype=tf.int32)-nop
+        pindex=tf.random.shuffle(positive_index,name='positive_shuffle')[:nop]
+        nindex=tf.random.shuffle(negative_index,name='negative_shuffle')[:non]
+        
+        tindex=tf.concat([pindex,nindex],axis=0)
+        tindex=tf.random.shuffle(tindex,name='total_shuffle')
+            
+        gt_label2=tf.expand_dims(tf.gather_nd(gt_label,indices=tindex),axis=0)
+        gt_coord2=tf.expand_dims(tf.gather_nd(gt_coord,indices=tindex),axis=0)
+        proposed2=tf.expand_dims(tf.gather_nd(proposed,indices=tindex),axis=0)
+        gt_mask2=tf.expand_dims(tf.gather_nd(gt_mask,indices=tindex),axis=0)
+        tindex=tf.expand_dims(tindex[:,1],axis=0)
+
+    '''
+    output 
+    
+    crop_fmap : (B,1500,14,14,512)
+    gt_label2 : (B,256,21)
+    gt_mask2 : (B,256)
+    gt_coord2 : (B,256,4)
+    proposed2 : (B,256,4)
+    tindex : (B,256)
+    
+    '''
+    return crop_fmap,gt_label2,gt_mask2,gt_coord2,proposed2 ,tindex
 
 
 for epo in range(1,epoch+1):
@@ -562,27 +628,25 @@ for epo in range(1,epoch+1):
     for data in tqdm(voc_train3):
       # data : {RoI Fmap (B,2000,14,14,512), Label (B,2000,21), gt_mask (B,2000), gt_coord (B,2000,4)}
       # Reg Mask Implement
-        fmap,label,gt_mask,gt_coord,_=making_frcnn_input(data)
+        fmap,label,gt_mask,gt_coord,_,tindex=making_frcnn_input(data)
         
-        pos_index=tf.expand_dims(gt_mask,axis=2)
-        reg_mask=tf.where(pos_index==20,0,1)
-        reg_mask=tf.cast(tf.expand_dims(tf.reshape(reg_mask,(-1,1500)),axis=2),tf.float32)
+        cal_pos=tf.math.argmax(label,axis=2)
+        cal_pos=tf.expand_dims(cal_pos,axis=2)
+        tindex=tf.expand_dims(tindex,axis=2)
+        reg_mask=tf.cast(tf.expand_dims(gt_mask,axis=2),dtype=tf.float32)
         gt_reg=tf.clip_by_value(gt_coord,-10,10)
-        
-        tf.where(pos_index!=20)
         # 128개 중 32개만 positive sample, o.w bg
         with tf.GradientTape() as tape:
-            pred_reg,pred_obj=frcn_model(fmap,training=False)    # pred_reg = (B,2000,84) , pred_obj= (B,2000,21)
+            pred_reg,pred_obj=frcn_model(fmap,training=True)    # pred_reg = (B,2000,84) , pred_obj= (B,2000,21)
             pred_reg=tf.reshape(pred_reg,(-1,1500,21,4))
-            reg1=tf.gather_nd(pred_reg,indices=pos_index,batch_dims=2)
-            pred_reg=reg1*reg_mask
+            reg1=tf.gather_nd(pred_reg,indices=tindex,batch_dims=1)
+            reg2=tf.gather_nd(reg1,indices=cal_pos,batch_dims=2)
+            
+            pred_reg=reg2*reg_mask
             gt_reg=gt_reg*reg_mask
+            obj1=tf.gather_nd(pred_obj,indices=tindex,batch_dims=1)
             
-            pred_reg
-            gt_reg
-            fmap.shape
-            
-            objectness_loss=loss_cls(label,pred_obj)  
+            objectness_loss=loss_cls(label,obj1)  
             bounding_box_loss=loss_bbr(gt_reg,pred_reg)
             train_sub_loss=tf.add_n([objectness_loss]+[(bounding_box_loss)])  
         
@@ -594,19 +658,25 @@ for epo in range(1,epoch+1):
     run["train/epoch_loss"].log(tf.reduce_sum(train_total_loss)/2443)
 
     for data in tqdm(voc_valid3):
-        fmap,label,gt_mask,gt_coord,_=making_frcnn_input(data)
         
-        pos_index=tf.expand_dims(gt_mask,axis=2)
-        reg_mask=tf.where(pos_index==20,0,1)
-        reg_mask=tf.cast(tf.expand_dims(tf.reshape(reg_mask,(-1,1500)),axis=2),tf.float32)
-        gt_reg_valid=tf.clip_by_value(gt_coord,-10,10)
+        fmap,label,gt_mask,gt_coord,_,tindex=making_frcnn_input(data)
+        
+        cal_pos=tf.math.argmax(label,axis=2)
+        cal_pos=tf.expand_dims(cal_pos,axis=2)
+        tindex=tf.expand_dims(tindex,axis=2)
+        reg_mask=tf.cast(tf.expand_dims(gt_mask,axis=2),dtype=tf.float32)
+        gt_reg=tf.clip_by_value(gt_coord,-10,10)
+            
         pred_reg_valid,pred_obj_valid=frcn_model(fmap,training=False)    # pred_reg = (B,2000,84) , pred_obj= (B,2000,21)
         pred_reg_valid=tf.reshape(pred_reg_valid,(-1,1500,21,4))
-        reg1=tf.gather_nd(pred_reg_valid,indices=pos_index,batch_dims=2)
-        pred_reg_valid=reg1*reg_mask
+        reg1=tf.gather_nd(pred_reg_valid,indices=tindex,batch_dims=1)
+        reg2=tf.gather_nd(reg1,indices=cal_pos,batch_dims=2)
+        pred_reg_valid=reg2*reg_mask
         gt_reg_valid=gt_reg_valid*reg_mask
         
-        objectness_loss=loss_cls(label,pred_obj_valid)  
+        obj1=tf.gather_nd(pred_obj_valid,indices=tindex,batch_dims=1)
+        
+        objectness_loss=loss_cls(label,obj1)  
         bounding_box_loss=loss_bbr(gt_reg_valid,pred_reg_valid)
         valid_sub_loss=tf.add_n([objectness_loss]+[(bounding_box_loss)])
         valid_total_loss=tf.add(valid_total_loss,valid_sub_loss)
@@ -614,13 +684,14 @@ for epo in range(1,epoch+1):
     valid_loss_list.append(valid_total_loss/63) 
     run["valid/epoch_loss"].log(valid_total_loss/63)
     
-    print("Train_Loss = {}, Valid_Loss={}, revision_count = {}".format(train_loss_list[epo],valid_loss_list[epo],revision_count))
     if valid_loss_list[best_valid_loss_index]>valid_loss_list[epo]:
         best_valid_loss_index=epo
         revision_count=0
         weight=frcn_model.get_weights()
     else:
         revision_count=revision_count+1
+    
+    print("Train_Loss = {}, Valid_Loss={}, revision_count = {}".format(train_loss_list[epo],valid_loss_list[epo],revision_count))
     
     if revision_count>=10:
         break
