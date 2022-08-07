@@ -486,7 +486,7 @@ loss_bbr=Loss_bbr()
 anchor_box=make_anchor()
 fmap_ext = tf.keras.Model(rpn_model.input, rpn_model.get_layer('conv2d').output)
 
-voc_train3=voc_train2.batch(2).prefetch(2)
+voc_train3=voc_train2.shuffle(buffer_size=4885).batch(2).prefetch(2)
 voc_valid3=voc_valid2.batch(2).prefetch(2)
 
 def making_frcnn_input(data):
@@ -672,7 +672,7 @@ for epo in range(1,epoch+1):
         reg1=tf.gather_nd(pred_reg_valid,indices=tindex,batch_dims=1)
         reg2=tf.gather_nd(reg1,indices=cal_pos,batch_dims=2)
         pred_reg_valid=reg2*reg_mask
-        gt_reg_valid=gt_reg_valid*reg_mask
+        gt_reg_valid=gt_coord*reg_mask
         
         obj1=tf.gather_nd(pred_obj_valid,indices=tindex,batch_dims=1)
         
