@@ -562,8 +562,8 @@ def making_frcnn_input(data):
             positive_pos=tf.where(i!=20,1,0)
             negative_index=tf.where(i==20)
             
-            nop=tf.clip_by_value(tf.reduce_sum(positive_pos),0,128)    
-            non=tf.constant(256,dtype=tf.int32)-nop
+            nop=tf.clip_by_value(tf.reduce_sum(positive_pos),0,32)    
+            non=tf.constant(128,dtype=tf.int32)-nop
             pindex=tf.random.shuffle(positive_index,name='positive_shuffle')[:nop]
             nindex=tf.random.shuffle(negative_index,name='negative_shuffle')[:non]
                         
@@ -592,8 +592,8 @@ def making_frcnn_input(data):
         positive_pos=tf.where(p_iou!=20,1,0)
         negative_index=tf.where(p_iou==20)
         
-        nop=tf.clip_by_value(tf.reduce_sum(positive_pos),0,128)    
-        non=tf.constant(256,dtype=tf.int32)-nop
+        nop=tf.clip_by_value(tf.reduce_sum(positive_pos),0,32)    
+        non=tf.constant(128,dtype=tf.int32)-nop
         pindex=tf.random.shuffle(positive_index,name='positive_shuffle')[:nop]
         nindex=tf.random.shuffle(negative_index,name='negative_shuffle')[:non]
         
@@ -617,7 +617,7 @@ def making_frcnn_input(data):
     tindex : (B,256)
     
     '''
-    return crop_fmap,gt_label2,gt_mask2,gt_coord2,proposed2 ,tindex
+    return crop_fmap,gt_label2,gt_mask2,gt_coord2,proposed,tindex
 
 
 for epo in range(1,epoch+1):
@@ -704,9 +704,9 @@ run["model"].upload(f"./model/frcn_{url}.h5")
 run.stop()
 
 
-'''
 
-frcn_model.load_weights('./model/frcn_FAS-23.h5')
+'''
+frcn_model.load_weights('./model/frcn_FAS-28.h5')
 
 for data in voc_valid3:
     test=data
@@ -736,18 +736,20 @@ def generate_coord(proposed,pred_reg):
 voc_valid4=voc_valid2.batch(1).prefetch(1)
 
 
-for n,data in enumerate(voc_train4):
-    if n==3:
+for n,data in enumerate(voc_valid4):
+    if n==1:
         test=data
         break
 
-fmap,label,gt_mask,gt_coord,proposed=making_frcnn_input(test)
-
-pos_index=tf.expand_dims(gt_mask,axis=2)
-reg_mask=tf.where(pos_index==20,0,1)
-reg_mask=tf.cast(tf.expand_dims(tf.reshape(reg_mask,(-1,1500)),axis=2),tf.float32)
+fmap,label,gt_mask,gt_coord,proposed,tindex=making_frcnn_input(test)
+cal_pos=tf.math.argmax(label,axis=2)
+cal_pos=tf.expand_dims(cal_pos,axis=2)
+tindex=tf.expand_dims(tindex,axis=2)
+reg_mask=tf.cast(tf.expand_dims(gt_mask,axis=2),dtype=tf.float32)
 gt_reg_valid=tf.clip_by_value(gt_coord,-10,10)
+
 pred_reg_valid,pred_obj_valid=frcn_model(fmap,training=False)    # pred_reg = (B,2000,84) , pred_obj= (B,2000,21)
+
 
 # 모형에서 출력하는 바운딩박스 오프셋을 좌표공간으로 매핑
 result=generate_coord(proposed,pred_reg_valid)
@@ -796,4 +798,19 @@ for i,j,k in zip(bbox2,pred_obj,test['image']):
     print(v_pdata)
     #vision_valid(k,v_pdata)
 
+
+
+
+
+voc_train3=voc_train2.batch(2).prefetch(2)
+
+for i in voc_train3:
+    print(i['image'].shape)
+
+
 '''
+
+
+
+
+
