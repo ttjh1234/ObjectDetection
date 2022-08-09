@@ -323,6 +323,21 @@ def valid_result(valid,iou=0.5,max_n=300):
         v_pdata = tf.gather(v_pdata, proposed_box)
         vision_valid(valid["image"],v_pdata)
 
+# RPN Network Performance test
+def valid_result2(valid,iou=0.5,max_n=300):
+    valid_reg,valid_cls=rpn_model(tf.expand_dims(valid["image"],axis=0),training=False)
+    print("GT Results")
+    vision_valid(valid["image"],valid["bbox"])
+    print("Model Results")
+    valid_reg2=inverse_trans(anchor_box,valid_reg)
+    valid_reg3=tf.reshape(valid_reg2,(-1,4))
+    # anchor_box.shape vs valid_reg.shape
+    v_cls=tf.reshape(valid_cls,(-1))
+    t2=tf.where(v_cls>=0.5,v_cls,0.0)
+    proposed_box=tf.image.non_max_suppression_with_scores(valid_reg3,t2,max_n,iou_threshold=iou)
+    print(proposed_box[1])
+    v_pdata = tf.gather(valid_reg3, proposed_box[0])
+    vision_valid(valid["image"],v_pdata)
 
 # RPN Network
 
@@ -486,9 +501,10 @@ loss_bbr=Loss_bbr()
 anchor_box=make_anchor()
 fmap_ext = tf.keras.Model(rpn_model.input, rpn_model.get_layer('conv2d').output)
 
-voc_train3=voc_train2.shuffle(buffer_size=4885).batch(2).prefetch(2)
+voc_train3=voc_train2.batch(2).prefetch(2)
 voc_valid3=voc_valid2.batch(2).prefetch(2)
 
+@tf.function
 def making_frcnn_input(data):
     img=data['image']
     gt_box=data['bbox']
@@ -650,6 +666,8 @@ for epo in range(1,epoch+1):
             bounding_box_loss=loss_bbr(gt_reg,pred_reg)
             train_sub_loss=tf.add_n([objectness_loss]+[(bounding_box_loss)])  
         
+        run["train/iter_obj_loss"].log(objectness_loss)
+        run["train/iter_reg_loss"].log(bounding_box_loss)
         run["train/iter_loss"].log(train_sub_loss)
         gradients=tape.gradient(train_sub_loss,frcn_model.trainable_variables)
         optimizer.apply_gradients(zip(gradients,frcn_model.trainable_variables))
@@ -681,6 +699,8 @@ for epo in range(1,epoch+1):
         valid_sub_loss=tf.add_n([objectness_loss]+[(bounding_box_loss)])
         valid_total_loss=tf.add(valid_total_loss,valid_sub_loss)
     
+    run["valid/iter_obj_loss"].log(objectness_loss)
+    run["valid/iter_reg_loss"].log(bounding_box_loss)
     valid_loss_list.append(valid_total_loss/63) 
     run["valid/epoch_loss"].log(valid_total_loss/63)
     
@@ -706,7 +726,7 @@ run.stop()
 
 
 '''
-frcn_model.load_weights('./model/frcn_FAS-28.h5')
+frcn_model.load_weights('./model/frcn_FAS-29.h5')
 
 for data in voc_valid3:
     test=data
@@ -803,14 +823,5 @@ for i,j,k in zip(bbox2,pred_obj,test['image']):
 
 
 voc_train3=voc_train2.batch(2).prefetch(2)
-
-for i in voc_train3:
-    print(i['image'].shape)
-
-
 '''
-
-
-
-
 
