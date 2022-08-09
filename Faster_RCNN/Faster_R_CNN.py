@@ -2,7 +2,7 @@
 # Faster RCNN Before Modularization
 
 # Library list
-'''
+
 import subprocess
 import sys
 
@@ -11,7 +11,6 @@ try:
 except:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "neptune-client"])
     import neptune.new as neptune
-'''
 
 import tensorflow as tf
 from tensorflow.keras.applications.vgg16 import VGG16
@@ -504,7 +503,7 @@ fmap_ext = tf.keras.Model(rpn_model.input, rpn_model.get_layer('conv2d').output)
 voc_train3=voc_train2.batch(2).prefetch(2)
 voc_valid3=voc_valid2.batch(2).prefetch(2)
 
-@tf.function
+
 def making_frcnn_input(data):
     img=data['image']
     gt_box=data['bbox']
@@ -570,6 +569,8 @@ def making_frcnn_input(data):
     # P가 128개보다 작을 경우, N으로 채워넣음.
     # P인 경우만 Reg Loss 계산, 나머지 256개는 전부다 Classifier Loss 계산
     # 현재, BG인 경우와 FG인 경우 식별 가능한 변수 => 
+    i=p_iou[1]
+    gt_label
     
     if tf.shape(crop_fmap)[0]==2:
         for n,i in enumerate(p_iou):
@@ -586,17 +587,17 @@ def making_frcnn_input(data):
             if tf.equal(n,tf.constant(0)):
                 tindex=tf.concat([pindex,nindex],axis=0)
                 tindex=tf.random.shuffle(tindex,name='total_shuffle')
-                gt_label2=tf.expand_dims(tf.gather_nd(gt_label,indices=tindex),axis=0)
-                gt_coord2=tf.expand_dims(tf.gather_nd(gt_coord,indices=tindex),axis=0)
-                proposed2=tf.expand_dims(tf.gather_nd(proposed,indices=tindex),axis=0)
-                gt_mask2=tf.expand_dims(tf.gather_nd(gt_mask,indices=tindex),axis=0)
+                gt_label2=tf.expand_dims(tf.gather_nd(gt_label[0,tf.newaxis],indices=tindex),axis=0)
+                gt_coord2=tf.expand_dims(tf.gather_nd(gt_coord[0,tf.newaxis],indices=tindex),axis=0)
+                proposed2=tf.expand_dims(tf.gather_nd(proposed[0,tf.newaxis],indices=tindex),axis=0)
+                gt_mask2=tf.expand_dims(tf.gather_nd(gt_mask[0,tf.newaxis],indices=tindex),axis=0)
             else:
                 temp_tindex=tf.concat([pindex,nindex],axis=0)
                 temp_tindex=tf.random.shuffle(temp_tindex,name='total_shuffle')
-                temp_label2=tf.expand_dims(tf.gather_nd(gt_label,indices=temp_tindex),axis=0)
-                temp_coord2=tf.expand_dims(tf.gather_nd(gt_coord,indices=temp_tindex),axis=0)
-                temp_proposed2=tf.expand_dims(tf.gather_nd(proposed,indices=temp_tindex),axis=0)
-                temp_gt_mask2=tf.expand_dims(tf.gather_nd(gt_mask,indices=temp_tindex),axis=0)
+                temp_label2=tf.expand_dims(tf.gather_nd(gt_label[1,tf.newaxis],indices=temp_tindex),axis=0)
+                temp_coord2=tf.expand_dims(tf.gather_nd(gt_coord[1,tf.newaxis],indices=temp_tindex),axis=0)
+                temp_proposed2=tf.expand_dims(tf.gather_nd(proposed[1,tf.newaxis],indices=temp_tindex),axis=0)
+                temp_gt_mask2=tf.expand_dims(tf.gather_nd(gt_mask[1,tf.newaxis],indices=temp_tindex),axis=0)
                 
                 gt_label2=tf.concat([gt_label2,temp_label2],axis=0)
                 gt_coord2=tf.concat([gt_coord2,temp_coord2],axis=0)
