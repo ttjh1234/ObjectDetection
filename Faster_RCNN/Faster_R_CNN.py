@@ -22,11 +22,10 @@ import matplotlib.pyplot as plt
 import cv2
 from tqdm import tqdm
 import os
-import neptune.new as neptune
 
 run = neptune.init(
     project="sungsu/Faster-R-CNN",
-    api_token="eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiI1YTJmMGZiOC1jYzc0LTRkNTYtYWU1YS1jMGI0YmNmZDU4ZjgifQ==",
+    api_token="--",
 )
 
 
@@ -547,9 +546,9 @@ def making_frcnn_input(data):
     plabel=tf.gather_nd(label,indices=tf.expand_dims(tf.math.argmax(iou2,axis=2),axis=2),batch_dims=1)
 
 
-    p_iou=tf.where(iou3>=0.5,plabel,20)
+    p_iou=tf.where(iou3>=0.5,plabel,-1)
     
-    gt_mask=tf.where(p_iou!=20,1,0)
+    gt_mask=tf.where(p_iou!=-1,1,0)
     gt_label=tf.one_hot(p_iou,depth=21)
     gt_box2=tf.reshape(gt_box,(-1,42,4))
 
@@ -569,17 +568,15 @@ def making_frcnn_input(data):
     # P가 128개보다 작을 경우, N으로 채워넣음.
     # P인 경우만 Reg Loss 계산, 나머지 256개는 전부다 Classifier Loss 계산
     # 현재, BG인 경우와 FG인 경우 식별 가능한 변수 => 
-    i=p_iou[1]
-    gt_label
     
     if tf.shape(crop_fmap)[0]==2:
         for n,i in enumerate(p_iou):
             i=tf.expand_dims(i,axis=0)
-            positive_index=tf.where(i!=20)
-            positive_pos=tf.where(i!=20,1,0)
-            negative_index=tf.where(i==20)
+            positive_index=tf.where(i!=-1)
+            positive_pos=tf.where(i!=-1,1,0)
+            negative_index=tf.where(i==-1)
             
-            nop=tf.clip_by_value(tf.reduce_sum(positive_pos),0,32)    
+            nop=tf.clip_by_value(tf.reduce_sum(positive_pos),0,64)    
             non=tf.constant(128,dtype=tf.int32)-nop
             pindex=tf.random.shuffle(positive_index,name='positive_shuffle')[:nop]
             nindex=tf.random.shuffle(negative_index,name='negative_shuffle')[:non]
@@ -605,11 +602,11 @@ def making_frcnn_input(data):
                 gt_mask2=tf.concat([gt_mask2,temp_gt_mask2],axis=0)
                 tindex=tf.concat([tf.expand_dims(tindex[:,1],axis=0),tf.expand_dims(temp_tindex[:,1],axis=0)],axis=0)
     else:
-        positive_index=tf.where(p_iou!=20)
-        positive_pos=tf.where(p_iou!=20,1,0)
-        negative_index=tf.where(p_iou==20)
+        positive_index=tf.where(p_iou!=-1)
+        positive_pos=tf.where(p_iou!=-1,1,0)
+        negative_index=tf.where(p_iou==-1)
         
-        nop=tf.clip_by_value(tf.reduce_sum(positive_pos),0,32)    
+        nop=tf.clip_by_value(tf.reduce_sum(positive_pos),0,64)    
         non=tf.constant(128,dtype=tf.int32)-nop
         pindex=tf.random.shuffle(positive_index,name='positive_shuffle')[:nop]
         nindex=tf.random.shuffle(negative_index,name='negative_shuffle')[:non]
