@@ -22,6 +22,8 @@ def unzip(source_file, dest_path):
 #unzip("./[라벨]남해_여수항_2구역_BOX.zip","./")
 #unzip("./제주항_맑음_20201227_0848_0004.zip","../")
 
+"제주항_맑음_20201227_0848_0004.zip".encode('utf-8')
+
 
 # 이 부분 수정해서 되게끔 만들기.
 
@@ -44,27 +46,23 @@ def serialize_example(dic):
 
     return example.SerializeToString()
 
-def deserialize_example(serialized_string):
-    image_feature_description = {
-        "image": tf.io.FixedLenFeature([], tf.string),
-        "image_shape": tf.io.FixedLenFeature([], tf.string),
-        "bbox": tf.io.VarLenFeature(tf.string),
-        "bbox_shape": tf.io.VarLenFeature(tf.string),
-        "filename": tf.io.VarLenFeature(tf.string)
-    }
-    example = tf.io.parse_sequence_example(serialized_string, image_feature_description)
-    
-    
-    bbox=tf.io.decode_raw(tf.reshape(tf.sparse.to_dense(example['bbox']),(-1,)),tf.float32)
-    bbox_shape=tf.io.decode_raw(tf.reshape(tf.sparse.to_dense(example['bbox_shape']),(-1,)),tf.int32)
-    filename=tf.reshape(tf.sparse.to_dense(example['filename']),(-1,))
+
+def decode_str(strtensor):
+    raw_string = str(strtensor.numpy(),'utf-8')
+    print(raw_string)
+    return raw_string
+
+
+def parse_func(example):
     image = tf.io.decode_raw(example["image"], tf.float32)
     image_shape = tf.io.decode_raw(example["image_shape"], tf.int32)
-    image=tf.reshape(image,image_shape[0])
-    bbox=tf.reshape(bbox,bbox_shape[0])
-    filename=str(filename.numpy().tolist()[0],'utf-8')
+    bbox = tf.io.decode_raw(example["bbox"], tf.float32)
+    bbox_shape = tf.io.decode_raw(example["bbox_shape"], tf.int32)
+    image=tf.reshape(image,image_shape)
+    bbox=tf.reshape(bbox,bbox_shape)
+    filename=tf.py_function(decode_str,[example["filename"]],[tf.string])
 
-    return image, bbox, filename
+    return {'image':image,'bbox':bbox,'filename':filename}
 
 def deserialize_example(serialized_string):
     image_feature_description = {
@@ -76,35 +74,10 @@ def deserialize_example(serialized_string):
     }
     example = tf.io.parse_example(serialized_string, image_feature_description)
     
-    
-    #bbox=tf.io.decode_raw(tf.reshape(tf.sparse.to_dense(example['bbox']),(-1,)),tf.float32)
-    #bbox_shape=tf.io.decode_raw(tf.reshape(tf.sparse.to_dense(example['bbox_shape']),(-1,)),tf.int32)
-    #filename=tf.reshape(tf.sparse.to_dense(example['filename']),(-1,))
-    
-    '''
-    image = tf.io.decode_raw(example["image"], tf.float32)
-    image_shape = tf.io.decode_raw(example["image_shape"], tf.int32)
-    bbox = tf.io.decode_raw(example["bbox"], tf.float32)
-    bbox_shape = tf.io.decode_raw(example["bbox_shape"], tf.int32)
-    image=tf.reshape(image,image_shape[0])
-    bbox=tf.reshape(bbox,bbox_shape[0])
-    filename=str(example["filename"].numpy().tolist()[0],'utf-8')
-    
-    #filename=str(filename.numpy().tolist()[0],'utf-8')
-    '''
-    
-    
+    dataset=tf.data.Dataset.from_tensor_slices(example).map(parse_func)
+        
     return dataset
 
-def parse_func(example):
-    image = tf.io.decode_raw(example["image"], tf.float32)
-    image_shape = tf.io.decode_raw(example["image_shape"], tf.int32)
-    bbox = tf.io.decode_raw(example["bbox"], tf.float32)
-    bbox_shape = tf.io.decode_raw(example["bbox_shape"], tf.int32)
-    image=tf.reshape(image,image_shape[0])
-    bbox=tf.reshape(bbox,bbox_shape[0])
-    filename=str(example["filename"].numpy().tolist()[0],'utf-8')
-    return image,bbox,filename
 
 def fetch_data(path):
     obj_num=0
@@ -149,13 +122,7 @@ def fetch_data(path):
 
 pt="./[원천]남해_여수항_2구역_BOX/남해_여수항_2구역_BOX/"
 write_path="./train/남해_여수항_2구역_BOX.json"
-data=[]
-
-data[0]['filename'].tobytes()
-data[0]['image_shape'].tobytes()
-data[0]['image'].tobytes()
-data[0]['bbox_shape'].tobytes()
-data[0]['bbox'].tobytes()
+#data=[]
 
 with tf.io.TFRecordWriter("test.tfrecord") as f:
     for i in os.listdir(pt):
@@ -170,143 +137,15 @@ with tf.io.TFRecordWriter("test.tfrecord") as f:
                     f.write(result)
                 break    
 
-data
-
-image_feature_description = {
-        "image": tf.io.FixedLenFeature([], tf.string),
-        "image_shape": tf.io.FixedLenFeature([], tf.string),
-        "bbox": tf.io.FixedLenFeature([], tf.string),
-        "bbox_shape": tf.io.FixedLenFeature([], tf.string),
-        "filename": tf.io.FixedLenFeature([], tf.string)
-    }
 
 
-dataset=tf.data.TFRecordDataset(["test.tfrecord"]).batch(2)
+dataset=tf.data.TFRecordDataset(["test.tfrecord"]).batch(3)
+
 for i in dataset:
     example = deserialize_example(i)
-    print(example)
 
-for i in dataset:
-    break
-
-tf.data.TFRecordDataset(["test.tfrecord"])
-
-
-image_feature_description = {
-    "image": tf.io.FixedLenFeature([], tf.string),
-    "image_shape": tf.io.FixedLenFeature([], tf.string),
-    "bbox": tf.io.VarLenFeature(tf.string),
-    "bbox_shape": tf.io.VarLenFeature(tf.string),
-    "filename": tf.io.VarLenFeature(tf.string)
-}
-example = tf.io.parse_example(i, image_feature_description)
-
-filename=tf.reshape(tf.sparse.to_dense(example['filename']),(-1,))
-
-
-example['filename']
-
-tf.io.decode_raw(tf.reshape(tf.sparse.to_dense(example['bbox']),(-1,)),tf.float32)
-tf.io.decode_raw(tf.reshape(tf.sparse.to_dense(example['bbox_shape']),(-1,)),tf.int32)
-image = tf.io.decode_raw(example["image"], tf.float32)
-image_shape = tf.io.decode_raw(example["image_shape"], tf.int32)
-bbox = tf.io.decode_raw(example["bbox"], tf.float32)
-bbox_shape = tf.io.decode_raw(example["bbox_shape"], tf.int32)
-filename = tf.io.decode_raw(example["filename"], tf.int32)
-filename=str(example["filename"].numpy().tolist()[0],'utf-8')
-
-tf.data.Dataset.from_tensor_slices(example["filename"]).map(tf.io.decode_raw)
-
-dataset=tf.data.Dataset.from_tensor_slices(example).map(parse_func)
-
-
-list(map(lambda x : tf.io.decode_raw(x,tf.float32),example["bbox"]))
-result=list(map(lambda x : str(x,'utf-8'),example["filename"].numpy().tolist()))
-
-
-filename=str(a.numpy().tolist()[0],'utf-8')
-
-i2=tf.reshape(image,image_shape[0])
-
-t=example["filename"]
-t.numpy()
-
-
-tf.compat.as_str_any()
-str(example["filename"].numpy().tolist()[0],'utf-8')
-
-
-str.encode(example["filename"].numpy(),'utf-8')
-
-filename
-image
-
-tf.compat.as_str_any(example['filename'])
-
-image2=tf.reshape(image,image_shape[0])
-example
-bbox_shape[0]
-bbox=tf.reshape(bbox,bbox_shape[0])
-
-data[2]
-
-
-'''
-# 이전 test 코드
-
-xml_path_  =  "./제주항_맑음_20201227_0848_0004.xml"
-xml =  open(xml_path_, mode = 'r', encoding="utf-8")
-xml_tree = Et.parse(xml) 
-xml_root = xml_tree.getroot() 
-img_name=xml_root.find("filename").text
-size = xml_root.find("size") 
-width = size.find("width")  
-height=size.find("height") 
-objects = xml_root.findall("object") # object들에 접근 , 다수가 존재할 수 있으므로 findall 사용
-
-
-image_path="./제주항_맑음_20201227_0848_0004.jpg"
-img_array = np.fromfile(image_path, np.uint8)
-img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-img=cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-img2=tf.cast(img,dtype=tf.float64)
-
-def vision_valid(image,gt_box):
-    img_rgb_copy = image.copy()
-    green_rgb = (255, 0, 0)
-    for rect in gt_box:
-        left = rect[1]
-        top = rect[0]
-        # rect[2], rect[3]은 너비와 높이이므로 우하단 좌표를 구하기 위해 좌상단 좌표에 각각을 더함.
-        right = rect[3]
-        bottom = rect[2]        
-
-        img_rgb_copy = cv2.rectangle(img_rgb_copy, (int(left), int(top)), (int(right), int(bottom)), color=green_rgb, thickness=5)
-
-    plt.figure(figsize=(8, 8))
-    plt.imshow(img_rgb_copy)
-    plt.show()
-
-
-bndbox_list=[]
-
-for i in objects:
-    bndbox=i.find("bndbox") # object 한 객체내에 bndbox 접근
-    xmin=bndbox.find('xmin').text # x최소 좌표 
-    xmax=bndbox.find('xmax').text# x최대 좌표
-    ymin=bndbox.find('ymin').text # y최소 좌표 
-    ymax=bndbox.find('ymax').text# y최대 좌표
-    bndbox_list.append([ymin,xmin,ymax,xmax])
-    
-vision_valid(img,bndbox_list)
-
-len(objects)
-
-
-'''
-
-
-
+for v in example:
+    print(v)
 
 
 
