@@ -92,7 +92,7 @@ def fetch_data(path):
     size = xml_root.find("size") 
     width = int(size.find("width").text)  
     height= int(size.find("height").text)
-    image_shape=np.array([500,500,3])
+    image_shape=np.array([512,512,3])
     bndbox_list=tf.zeros([0,4],dtype=tf.float32)
 
     for i in objects:
@@ -111,7 +111,7 @@ def fetch_data(path):
         img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
         img=cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         img2=tf.cast(img,dtype=tf.float64)
-        img2=tf.image.resize(img2,(500,500))
+        img2=tf.image.resize(img2,(512,512))/255.0
         bbox_shape=np.array([obj_num,4])
 
         return {"filename":img_name,"image":img2.numpy(),"image_shape":image_shape,"bbox":bndbox_list.numpy(),"bbox_shape":bbox_shape}
@@ -135,18 +135,85 @@ with tf.io.TFRecordWriter("test.tfrecord") as f:
                 if dic:
                     result=serialize_example(dic)
                     f.write(result)
-                break    
+                   
+
+# 모든 zip 파일에 대해서 새론 폴더로 옮기고(짝 맞춰서), unzip하고 다 처리되면 파일 삭제 
+# 우선 training에 있는 파일들만 사용해서 train.tfrecord로 모으기
+# 여기서, 한글 파일명은 일단은 utf-8로 바뀌어서 나오는데, eager tensor에서는 무슨 이유인지는 몰라도
+# 계속 바뀌지 않는 오류가 발생함. 따라서, 우선 나오도록하고, 추후에 str(filename,'utf-8) 로 바꾸어서 
+# 출력하는 것이 최선이라고 판단함.
 
 
+dataset=tf.data.TFRecordDataset(["test.tfrecord"]) 
+tmp=iter(dataset)
 
-dataset=tf.data.TFRecordDataset(["test.tfrecord"]).batch(3)
+dataset
+count=0
+
+while True:
+    next(tmp)
+    count=count+1
+
+a=next(tmp)
+
+a
+
+n_data=0
+for i in dataset.batch(100000,drop_remainder=True).take(1):
+    n_data=n_data+1
+
+dataset=tf.data.TFRecordDataset(["test.tfrecord"]).batch(1)
 
 for i in dataset:
     example = deserialize_example(i)
+    break
 
 for v in example:
     print(v)
 
 
+c1=os.listdir("E:/해상 객체 이미지/Training")
 
+import re
+
+c1[0]
+
+fname=str.split(c1[0],']')[1]
+if "SEG" not in str.split(fname,'.zip')[0]:
+    print("Yes")
+
+rep=".*.zip"
+
+print(re.search(rep,c1[1]))
+
+
+c1
+
+path="E:/해상 객체 이미지/Training"
+def filename_extract(path):
+    filelist=[]    
+    allfile=os.listdir(path)
+    rep=".*.zip"
+    for i in allfile:
+        fname=str.split(i,']')[-1]
+        if not re.search(rep,fname):
+            continue
+        chunkfname=str.split(fname,'.zip')[0]
+        if len(str.split(chunkfname,"BOX"))==1:
+            continue
+        
+        chunkfname=str.split(chunkfname,"BOX")[0]+"BOX"
+        if chunkfname not in filelist:
+            filelist.append(chunkfname)
+    
+    return filelist
+
+train_fname=filename_extract("E:/해상 객체 이미지/Training")
+d=train_fname[0]
+
+
+os.listdir(path)
+
+
+def find_file(path,file_list):
 
