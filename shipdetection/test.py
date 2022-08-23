@@ -17,15 +17,13 @@ def unzip(source_file, dest_path):
     with zipfile.ZipFile(source_file, 'r') as zf:
         zipInfo = zf.infolist()
         for member in zipInfo:
-            member.filename = member.filename.encode("cp437").decode("euc-kr")
-            if str.split(member.filename,'.')[-1]=="xml":
+            #member.filename = member.filename.encode("cp437").decode("euc-kr")
+            if str.split(member.filename,'.')[-1]!="json":
                 zf.extract(member,dest_path)
 
-
-#unzip("./[라벨]남해_여수항_2구역_BOX.zip","./")
+#unzip("./[라벨]동해_묵호항_1구역_BOX.zip","./")
 #unzip("./제주항_맑음_20201227_0848_0004.zip","../")
 
-"제주항_맑음_20201227_0848_0004.zip".encode('utf-8')
 
 
 # 이 부분 수정해서 되게끔 만들기.
@@ -52,7 +50,6 @@ def serialize_example(dic):
 
 def decode_str(strtensor):
     raw_string = str(strtensor.numpy(),'utf-8')
-    print(raw_string)
     return raw_string
 
 
@@ -220,9 +217,7 @@ for t in file_name:
     origin_list.append(subo_list)
     label_list.append(subl_list)
 
-source = "E:/해상 객체 이미지/Training/"
-destination = "./train/"
-os.listdir(destination)
+
 
 file_name
 origin_list
@@ -230,7 +225,6 @@ label_list
 
 # example
 os.getcwd()
-os.listdir("./train")
 
 def fetch_data2(image_path,xml_path1,xml_path2):
     obj_num=0
@@ -273,28 +267,34 @@ def fetch_data2(image_path,xml_path1,xml_path2):
         return None
 
 
+str.split(file_name[0][0],'.')[0]
+
+str.split(file_name[0][0],'.')[0] in os.listdir("./train")
 
 source = "E:/해상 객체 이미지/Training/"
 with tf.io.TFRecordWriter("training.tfrecord") as f:
     for a,b,c in zip(file_name,origin_list,label_list):
         for d in a:
-            shutil.copy2(source+d, "./train")
-            unzip("./train/"+d,"./train/")
-            os.remove("./train/"+d)
+            if str.split(d,'.')[0] in os.listdir("./train"):
+                continue
+            else:
+                shutil.copy2(source+d, "./train")
+                unzip("./train/"+d,"./train/"+str.split(d,'.')[0])
+                os.remove("./train/"+d)
         print("Unzip & Remove zip file in one place\n")
         c=c*len(b)
         print("Start Extract data in one place\n")
         for pt,pl in zip(b,c):
             xml_path1=pl+'/'+os.listdir(pl)[0]+'/'
             for t1 in os.listdir(pt):
-                for i in os.listdir(pt+t1):
+                for i in os.listdir(pt+'/'+t1):
                     subpath1=t1+'/'+i+'/'    
-                    for j in os.listdir(pt+subpath1):
+                    for j in os.listdir(pt+'/'+subpath1):
                         subpath2=subpath1+j+'/'
-                        for k in os.listdir(pt+subpath2):
+                        for k in os.listdir(pt+'/'+subpath2):
                             data_path=subpath2+k
-                            full_path=pt+data_path
-                            fp="/"+str.join('/',str.split(full_path,'/')[3:])
+                            full_path=pt+'/'+data_path
+                            fp="/"+str.join('/',str.split(full_path,'/')[4:])
                             dic=fetch_data2(full_path,xml_path1,fp)
                             if dic:
                                 result=serialize_example(dic)
