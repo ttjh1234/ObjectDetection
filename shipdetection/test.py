@@ -6,6 +6,9 @@ import numpy as np
 import tensorflow as tf
 import zipfile
 import json
+import re
+import shutil
+
 
 os.getcwd()
 os.chdir("C:/Users/UOS/Desktop/새론")
@@ -121,7 +124,6 @@ def fetch_data(path):
 
 
 pt="./[원천]남해_여수항_2구역_BOX/남해_여수항_2구역_BOX/"
-write_path="./train/남해_여수항_2구역_BOX.json"
 #data=[]
 
 with tf.io.TFRecordWriter("test.tfrecord") as f:
@@ -143,21 +145,10 @@ with tf.io.TFRecordWriter("test.tfrecord") as f:
 # 계속 바뀌지 않는 오류가 발생함. 따라서, 우선 나오도록하고, 추후에 str(filename,'utf-8) 로 바꾸어서 
 # 출력하는 것이 최선이라고 판단함.
 
-
+'''
 dataset=tf.data.TFRecordDataset(["test.tfrecord"]) 
 tmp=iter(dataset)
-
 dataset
-count=0
-
-while True:
-    next(tmp)
-    count=count+1
-
-a=next(tmp)
-
-a
-
 n_data=0
 for i in dataset.batch(100000,drop_remainder=True).take(1):
     n_data=n_data+1
@@ -170,24 +161,10 @@ for i in dataset:
 
 for v in example:
     print(v)
-
+'''
 
 c1=os.listdir("E:/해상 객체 이미지/Training")
 
-import re
-
-c1[0]
-
-fname=str.split(c1[0],']')[1]
-if "SEG" not in str.split(fname,'.zip')[0]:
-    print("Yes")
-
-rep=".*.zip"
-
-print(re.search(rep,c1[1]))
-
-
-c1
 
 path="E:/해상 객체 이미지/Training"
 def filename_extract(path):
@@ -209,11 +186,147 @@ def filename_extract(path):
     return filelist
 
 train_fname=filename_extract("E:/해상 객체 이미지/Training")
-d=train_fname[0]
-
-
-os.listdir(path)
-
-
+        
 def find_file(path,file_list):
+    Filelist=[]
+    for d in file_list:
+        flist=[]
+        for i in os.listdir(path):
+            rep="[\[라벨|원천].*"+d+".+"
+            temp=re.search(rep,i)
+            if temp:
+                if temp.group() not in flist:
+                    flist.append(temp.group())
+        Filelist.append(flist)
+    return Filelist
+
+
+file_name=find_file(path,train_fname)
+
+
+os.getcwd()
+os.chdir("C:/Users/UOS/Desktop/새론")
+
+origin_list=[]
+label_list=[]
+for t in file_name:
+    subo_list=[]
+    subl_list=[]
+    for k in t:
+        if re.search("원천",k):
+            subo_list.append("./train/"+str.split(k,".zip")[0])
+        if re.search("라벨",k):
+            subl_list.append("./train/"+str.split(k,".zip")[0])
+    origin_list.append(subo_list)
+    label_list.append(subl_list)
+
+source = "E:/해상 객체 이미지/Training/"
+destination = "./train/"
+os.listdir(destination)
+
+file_name
+origin_list
+label_list
+
+# example
+os.getcwd()
+os.listdir("./train")
+
+def fetch_data2(image_path,xml_path1,xml_path2):
+    obj_num=0
+    image_path= image_path
+    xml_path_ = xml_path1+str.split(xml_path2,'.')[0]+".xml"
+    
+    xml =  open(xml_path_, mode = 'r', encoding="utf-8")
+    xml_tree = Et.parse(xml) 
+    xml_root = xml_tree.getroot()
+    img_name=xml_root.find("filename").text
+    objects = xml_root.findall("object")
+    size = xml_root.find("size") 
+    width = int(size.find("width").text)  
+    height= int(size.find("height").text)
+    image_shape=np.array([512,512,3])
+    bndbox_list=tf.zeros([0,4],dtype=tf.float32)
+
+    for i in objects:
+        if i.find("category_id").text=='2':
+            obj_num=obj_num+1
+            bndbox=i.find("bndbox") # object 한 객체내에 bndbox 접근
+            xmin=tf.cast(int(bndbox.find('xmin').text),dtype=tf.float32)/width # x최소 좌표 
+            xmax=tf.cast(int(bndbox.find('xmax').text),dtype=tf.float32)/width # x최대 좌표
+            ymin=tf.cast(int(bndbox.find('ymin').text),dtype=tf.float32)/height # y최소 좌표 
+            ymax=tf.cast(int(bndbox.find('ymax').text),dtype=tf.float32)/height # y최대 좌표
+            temp_box=tf.reshape(tf.stack([ymin,xmin,ymax,xmax]),(-1,4))
+            bndbox_list=tf.concat([bndbox_list,temp_box],axis=0)
+
+    if obj_num>=3:
+        img_array = np.fromfile(image_path, np.uint8)
+        img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+        img=cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img2=tf.cast(img,dtype=tf.float64)
+        img2=tf.image.resize(img2,(512,512))/255.0
+        bbox_shape=np.array([obj_num,4])
+
+        return {"filename":img_name,"image":img2.numpy(),"image_shape":image_shape,"bbox":bndbox_list.numpy(),"bbox_shape":bbox_shape}
+
+    else:
+        return None
+
+
+
+source = "E:/해상 객체 이미지/Training/"
+with tf.io.TFRecordWriter("training.tfrecord") as f:
+    for a,b,c in zip(file_name,origin_list,label_list):
+        for d in a:
+            shutil.copy2(source+d, "./train")
+            unzip("./train/"+d,"./train/")
+            os.remove("./train/"+d)
+        print("Unzip & Remove zip file in one place\n")
+        c=c*len(b)
+        print("Start Extract data in one place\n")
+        for pt,pl in zip(b,c):
+            xml_path1=pl+'/'+os.listdir(pl)[0]+'/'
+            for t1 in os.listdir(pt):
+                for i in os.listdir(pt+t1):
+                    subpath1=t1+'/'+i+'/'    
+                    for j in os.listdir(pt+subpath1):
+                        subpath2=subpath1+j+'/'
+                        for k in os.listdir(pt+subpath2):
+                            data_path=subpath2+k
+                            full_path=pt+data_path
+                            fp="/"+str.join('/',str.split(full_path,'/')[3:])
+                            dic=fetch_data2(full_path,xml_path1,fp)
+                            if dic:
+                                result=serialize_example(dic)
+                                f.write(result)                
+            os.remove(pt)
+        os.remove(pl)
+        print("End Extract data in one place\n")
+
+            
+
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
