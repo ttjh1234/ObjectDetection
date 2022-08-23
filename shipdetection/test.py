@@ -17,14 +17,15 @@ def unzip(source_file, dest_path):
     with zipfile.ZipFile(source_file, 'r') as zf:
         zipInfo = zf.infolist()
         for member in zipInfo:
-            #member.filename = member.filename.encode("cp437").decode("euc-kr")
+            if len(re.findall('[^가-힣a-zA-Z0-9_.{./}]+',member.filename))>0:
+                member.filename = member.filename.encode("cp437").decode("euc-kr")
             if str.split(member.filename,'.')[-1]!="json":
                 zf.extract(member,dest_path)
 
+
 #unzip("./[라벨]동해_묵호항_1구역_BOX.zip","./")
 #unzip("./제주항_맑음_20201227_0848_0004.zip","../")
-
-
+#unzip("./[라벨]서해_군산항_1구역_BOX.zip","./")
 
 # 이 부분 수정해서 되게끔 만들기.
 
