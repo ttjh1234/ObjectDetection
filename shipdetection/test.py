@@ -299,13 +299,11 @@ with tf.io.TFRecordWriter("training.tfrecord") as f:
                             if dic:
                                 result=serialize_example(dic)
                                 f.write(result)                
-            os.remove(pt)
-        os.remove(pl)
+            shutil.rmtree(pt)
+        shutil.rmtree(pl)
         print("End Extract data in one place\n")
 
             
-
-    
 
 
 
