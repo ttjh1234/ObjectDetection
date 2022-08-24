@@ -284,9 +284,9 @@ with tf.io.TFRecordWriter("train.tfrecord") as f:
                 shutil.copy2(source+d, "./train")
                 unzip("./train/"+d,"./train/"+str.split(d,'.')[0])
                 os.remove("./train/"+d)
-        print("Unzip & Remove zip file in one place\n")
+        print("Unzip & Remove zip file in one port\n")
         c=c*len(b)
-        print("Start Extract data in one place\n")
+        print("Start Extract data in one port\n")
         for pt,pl in zip(b,c):
             xml_path1=pl+'/'+os.listdir(pl)[0]+'/'
             for t1 in os.listdir(pt):
@@ -312,7 +312,7 @@ with tf.io.TFRecordWriter("train.tfrecord") as f:
                                                 
             shutil.rmtree(pt)
         shutil.rmtree(pl)
-        print("End Extract data in one place\n")
+        print("End Extract data in one port\n")
 
 
 dataset=tf.data.Dataset("training.tfrecord")
@@ -324,7 +324,7 @@ tmp=iter(dataset)
 dataset=dataset.map(deserialize_example)
 
 
-dataset=tf.data.TFRecordDataset(["training.tfrecord"]).batch(1)
+dataset=tf.data.TFRecordDataset(["train.tfrecord"]).batch(1)
 
 for i in dataset:
     example = deserialize_example(i)
@@ -335,13 +335,113 @@ for v in example:
 
 k=iter(dataset)
 
-count=0
-while True:
-    next(k)
-    count=count+1
+
+## validation 파일 추출
+# train에 사용된 항구는 제외하여 사용.
+
+
+os.getcwd()
+os.chdir("C:/Users/UOS/Desktop/새론")
+
+path="E:/해상 객체 이미지/Validation"
+def filename_extract(path):
+    filelist=[]    
+    allfile=os.listdir(path)
+    rep=".*.zip"
+    for i in allfile:
+        fname=str.split(i,']')[-1]
+        if not re.search(rep,fname):
+            continue
+        chunkfname=str.split(fname,'.zip')[0]
+        if len(str.split(chunkfname,"BOX"))==1:
+            continue
+        
+        chunkfname=str.split(chunkfname,"BOX")[0]+"BOX"
+        if chunkfname not in filelist:
+            filelist.append(chunkfname)
+    
+    return filelist
+
+valid_fname=filename_extract("E:/해상 객체 이미지/Validation")
+
+def find_file(path,file_list):
+    Filelist=[]
+    for d in file_list:
+        flist=[]
+        for i in os.listdir(path):
+            rep="[\[라벨|원천].*"+d+".+"
+            temp=re.search(rep,i)
+            if temp:
+                if temp.group() not in flist:
+                    flist.append(temp.group())
+        Filelist.append(flist)
+    return Filelist
+
+valid_fname
+train_fname
+
+vf=set(valid_fname)
+tf=set(train_fname)
+vf2=vf.difference(tf)
+vf3=list(vf2)
+
+
+file_name_valid=find_file(path,vf3)
+
+valid_origin_list=[]
+valid_label_list=[]
+for t in file_name_valid:
+    subo_list=[]
+    subl_list=[]
+    for k in t:
+        if re.search("원천",k):
+            subo_list.append("./valid/"+str.split(k,".zip")[0])
+        if re.search("라벨",k):
+            subl_list.append("./valid/"+str.split(k,".zip")[0])
+    valid_origin_list.append(subo_list)
+    valid_label_list.append(subl_list)
 
 
 
+source = "E:/해상 객체 이미지/Validation/"
+with tf.io.TFRecordWriter("valid.tfrecord") as f:
+    for a,b,c in zip(file_name_valid,valid_origin_list,valid_label_list):
+        for d in a:
+            if str.split(d,'.')[0] in os.listdir("./valid"):
+                continue
+            else:
+                shutil.copy2(source+d, "./train")
+                unzip("./train/"+d,"./train/"+str.split(d,'.')[0])
+                os.remove("./train/"+d)
+        print("Unzip & Remove zip file in one port\n")
+        c=c*len(b)
+        print("Start Extract data in one port\n")
+        for pt,pl in zip(b,c):
+            xml_path1=pl+'/'+os.listdir(pl)[0]+'/'
+            for t1 in os.listdir(pt):
+                for i in os.listdir(pt+'/'+t1):
+                    subpath1=t1+'/'+i+'/'    
+                    for j in os.listdir(pt+'/'+subpath1):
+                        subpath2=subpath1+j+'/'
+                        rpath=os.listdir(pt+'/'+subpath2)
+                        random.shuffle(rpath)
+                        jump_var=0
+                        for k in rpath:
+                            if jump_var>0:
+                                jump_var=jump_var-1
+                                continue
+                            data_path=subpath2+k
+                            full_path=pt+'/'+data_path
+                            fp="/"+str.join('/',str.split(full_path,'/')[4:])
+                            dic=fetch_data2(full_path,xml_path1,fp)
+                            if dic:
+                                jump_var=2
+                                result=serialize_example(dic)
+                                f.write(result)
+                                                
+            shutil.rmtree(pt)
+        shutil.rmtree(pl)
+        print("End Extract data in one port\n")
 
 
 
