@@ -238,7 +238,11 @@ def fetch_data2(image_path,xml_path1,xml_path2):
     image_path= image_path
     xml_path_ = xml_path1+str.split(xml_path2,'.')[0]+".xml"
     
-    xml =  open(xml_path_, mode = 'r', encoding="utf-8")
+    try:
+        xml =  open(xml_path_, mode = 'r', encoding="utf-8")
+    except:
+        return None
+    
     xml_tree = Et.parse(xml) 
     xml_root = xml_tree.getroot()
     img_name=xml_root.find("filename").text
@@ -401,18 +405,20 @@ for t in file_name_valid:
     valid_origin_list.append(subo_list)
     valid_label_list.append(subl_list)
 
-
+file_name_valid[:7]
+valid_origin_list[:7]
+valid_label_list[:7]
 
 source = "E:/해상 객체 이미지/Validation/"
 with tf.io.TFRecordWriter("valid.tfrecord") as f:
-    for a,b,c in zip(file_name_valid,valid_origin_list,valid_label_list):
+    for a,b,c in zip(file_name_valid[:7],valid_origin_list[:7],valid_label_list[:7]):
         for d in a:
             if str.split(d,'.')[0] in os.listdir("./valid"):
                 continue
             else:
-                shutil.copy2(source+d, "./train")
-                unzip("./train/"+d,"./train/"+str.split(d,'.')[0])
-                os.remove("./train/"+d)
+                shutil.copy2(source+d, "./valid")
+                unzip("./valid/"+d,"./valid/"+str.split(d,'.')[0])
+                os.remove("./valid/"+d)
         print("Unzip & Remove zip file in one port\n")
         c=c*len(b)
         print("Start Extract data in one port\n")
@@ -444,7 +450,44 @@ with tf.io.TFRecordWriter("valid.tfrecord") as f:
         print("End Extract data in one port\n")
 
 
-
+with tf.io.TFRecordWriter("test.tfrecord") as f:
+    for a,b,c in zip(file_name_valid[7:],valid_origin_list[7:],valid_label_list[7:]):
+        for d in a:
+            if str.split(d,'.')[0] in os.listdir("./test"):
+                continue
+            else:
+                shutil.copy2(source+d, "./test")
+                unzip("./test/"+d,"./test/"+str.split(d,'.')[0])
+                os.remove("./test/"+d)
+        print("Unzip & Remove zip file in one port\n")
+        c=c*len(b)
+        print("Start Extract data in one port\n")
+        for pt,pl in zip(b,c):
+            xml_path1=pl+'/'+os.listdir(pl)[0]+'/'
+            for t1 in os.listdir(pt):
+                for i in os.listdir(pt+'/'+t1):
+                    subpath1=t1+'/'+i+'/'    
+                    for j in os.listdir(pt+'/'+subpath1):
+                        subpath2=subpath1+j+'/'
+                        rpath=os.listdir(pt+'/'+subpath2)
+                        random.shuffle(rpath)
+                        jump_var=0
+                        for k in rpath:
+                            if jump_var>0:
+                                jump_var=jump_var-1
+                                continue
+                            data_path=subpath2+k
+                            full_path=pt+'/'+data_path
+                            fp="/"+str.join('/',str.split(full_path,'/')[4:])
+                            dic=fetch_data2(full_path,xml_path1,fp)
+                            if dic:
+                                jump_var=2
+                                result=serialize_example(dic)
+                                f.write(result)
+                                                
+            shutil.rmtree(pt)
+        shutil.rmtree(pl)
+        print("End Extract data in one port\n")
 
 
 
