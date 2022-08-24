@@ -8,6 +8,7 @@ import zipfile
 import json
 import re
 import shutil
+import random
 
 
 os.getcwd()
@@ -137,6 +138,8 @@ with tf.io.TFRecordWriter("test.tfrecord") as f:
                     f.write(result)
                    
 
+
+
 # 모든 zip 파일에 대해서 새론 폴더로 옮기고(짝 맞춰서), unzip하고 다 처리되면 파일 삭제 
 # 우선 training에 있는 파일들만 사용해서 train.tfrecord로 모으기
 # 여기서, 한글 파일명은 일단은 utf-8로 바뀌어서 나오는데, eager tensor에서는 무슨 이유인지는 몰라도
@@ -162,6 +165,9 @@ for v in example:
 '''
 
 c1=os.listdir("E:/해상 객체 이미지/Training")
+
+for i in c1:
+    print(i)
 
 
 path="E:/해상 객체 이미지/Training"
@@ -268,12 +274,8 @@ def fetch_data2(image_path,xml_path1,xml_path2):
         return None
 
 
-str.split(file_name[0][0],'.')[0]
-
-str.split(file_name[0][0],'.')[0] in os.listdir("./train")
-
 source = "E:/해상 객체 이미지/Training/"
-with tf.io.TFRecordWriter("training.tfrecord") as f:
+with tf.io.TFRecordWriter("train.tfrecord") as f:
     for a,b,c in zip(file_name,origin_list,label_list):
         for d in a:
             if str.split(d,'.')[0] in os.listdir("./train"):
@@ -292,27 +294,51 @@ with tf.io.TFRecordWriter("training.tfrecord") as f:
                     subpath1=t1+'/'+i+'/'    
                     for j in os.listdir(pt+'/'+subpath1):
                         subpath2=subpath1+j+'/'
-                        for k in os.listdir(pt+'/'+subpath2):
+                        rpath=os.listdir(pt+'/'+subpath2)
+                        random.shuffle(rpath)
+                        jump_var=0
+                        for k in rpath:
+                            if jump_var>0:
+                                jump_var=jump_var-1
+                                continue
                             data_path=subpath2+k
                             full_path=pt+'/'+data_path
                             fp="/"+str.join('/',str.split(full_path,'/')[4:])
                             dic=fetch_data2(full_path,xml_path1,fp)
                             if dic:
+                                jump_var=2
                                 result=serialize_example(dic)
-                                f.write(result)                
+                                f.write(result)
+                                                
             shutil.rmtree(pt)
         shutil.rmtree(pl)
         print("End Extract data in one place\n")
 
-            
+
+dataset=tf.data.Dataset("training.tfrecord")
 
 
 
+dataset=tf.data.TFRecordDataset(["training.tfrecord"]) 
+tmp=iter(dataset)
+dataset=dataset.map(deserialize_example)
 
 
+dataset=tf.data.TFRecordDataset(["training.tfrecord"]).batch(1)
 
+for i in dataset:
+    example = deserialize_example(i)
+    break
 
+for v in example:
+    print(v)
 
+k=iter(dataset)
+
+count=0
+while True:
+    next(k)
+    count=count+1
 
 
 
