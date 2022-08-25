@@ -23,12 +23,12 @@ def unzip(source_file, dest_path):
             if str.split(member.filename,'.')[-1]!="json":
                 zf.extract(member,dest_path)
 
-
+'''
+Usage Example
 #unzip("./[라벨]동해_묵호항_1구역_BOX.zip","./")
 #unzip("./제주항_맑음_20201227_0848_0004.zip","../")
 #unzip("./[라벨]서해_군산항_1구역_BOX.zip","./")
-
-# 이 부분 수정해서 되게끔 만들기.
+'''
 
 def serialize_example(dic):
     image = dic["image"].tobytes()
@@ -80,8 +80,14 @@ def deserialize_example(serialized_string):
         
     return dataset
 
-
 def fetch_data(path):
+    
+    '''
+    Function fetch_data 
+    This is single specific path task
+    General Version is fetch_data2 which is below that.
+    '''
+    
     obj_num=0
     image_path= "./[원천]남해_여수항_2구역_BOX/남해_여수항_2구역_BOX/"+path
     xml_path_ = "./[라벨]남해_여수항_2구역_BOX/남해_여수항_2구역_BOX/"+str.split(path,'.')[0]+".xml"
@@ -121,9 +127,17 @@ def fetch_data(path):
     else:
         return None
 
+'''
+    # Fetch_data Usage
+    # First Data Read
+    # Second Data Parse and Match
+    # Third Data Serialize 
+'''
 
+
+'''
 pt="./[원천]남해_여수항_2구역_BOX/남해_여수항_2구역_BOX/"
-#data=[]
+
 
 with tf.io.TFRecordWriter("test.tfrecord") as f:
     for i in os.listdir(pt):
@@ -136,42 +150,22 @@ with tf.io.TFRecordWriter("test.tfrecord") as f:
                 if dic:
                     result=serialize_example(dic)
                     f.write(result)
-                   
+'''                   
 
 
-
-# 모든 zip 파일에 대해서 새론 폴더로 옮기고(짝 맞춰서), unzip하고 다 처리되면 파일 삭제 
-# 우선 training에 있는 파일들만 사용해서 train.tfrecord로 모으기
 # 여기서, 한글 파일명은 일단은 utf-8로 바뀌어서 나오는데, eager tensor에서는 무슨 이유인지는 몰라도
-# 계속 바뀌지 않는 오류가 발생함. 따라서, 우선 나오도록하고, 추후에 str(filename,'utf-8) 로 바꾸어서 
-# 출력하는 것이 최선이라고 판단함.
-
-'''
-dataset=tf.data.TFRecordDataset(["test.tfrecord"]) 
-tmp=iter(dataset)
-dataset
-n_data=0
-for i in dataset.batch(100000,drop_remainder=True).take(1):
-    n_data=n_data+1
-
-dataset=tf.data.TFRecordDataset(["test.tfrecord"]).batch(1)
-
-for i in dataset:
-    example = deserialize_example(i)
-    break
-
-for v in example:
-    print(v)
-'''
-
-c1=os.listdir("E:/해상 객체 이미지/Training")
-
-for i in c1:
-    print(i)
-
+# 계속 바뀌지 않는 오류가 발생함. 따라서, 우선 나오도록하고, 추후에 str(filename,'utf-8) 로 바꾸어서 출력
 
 path="E:/해상 객체 이미지/Training"
 def filename_extract(path):
+    
+    '''
+    Given Path, Extract Filename along Path
+    except Seg.zip File
+    Only Use Box.zip
+    Extract Main Name except extension
+    '''
+    
     filelist=[]    
     allfile=os.listdir(path)
     rep=".*.zip"
@@ -192,6 +186,12 @@ def filename_extract(path):
 train_fname=filename_extract("E:/해상 객체 이미지/Training")
         
 def find_file(path,file_list):
+    
+    '''
+    Given Path & Filename(except extension) , Extract Filename(including Extension) 
+    And Generate List which bind Image File & Annotation File    
+    '''
+    
     Filelist=[]
     for d in file_list:
         flist=[]
@@ -211,6 +211,11 @@ file_name=find_file(path,train_fname)
 os.getcwd()
 os.chdir("C:/Users/UOS/Desktop/새론")
 
+'''
+Below that, Binded File to extract Image Path & Annotation Path
+Because, There are Many-to-one Matching, So, later iterate Loop and open that File pair 
+'''
+
 origin_list=[]
 label_list=[]
 for t in file_name:
@@ -225,15 +230,25 @@ for t in file_name:
     label_list.append(subl_list)
 
 
+'''
+# Checking Result
 
-file_name
-origin_list
-label_list
+# file_name
+# origin_list
+# label_list
 
-# example
-os.getcwd()
+'''
+
 
 def fetch_data2(image_path,xml_path1,xml_path2):
+    
+    '''
+    General Version of fetch_data
+    Given image_path, Match Image File name & annotation File 
+    but there are not standard path address.
+    So split path to handle easily.  
+    '''
+    
     obj_num=0
     image_path= image_path
     xml_path_ = xml_path1+str.split(xml_path2,'.')[0]+".xml"
@@ -272,9 +287,11 @@ def fetch_data2(image_path,xml_path1,xml_path2):
         img2=tf.image.resize(img2,(512,512))/255.0
         bbox_shape=np.array([obj_num,4])
 
+        xml.close()
         return {"filename":img_name,"image":img2.numpy(),"image_shape":image_shape,"bbox":bndbox_list.numpy(),"bbox_shape":bbox_shape}
 
     else:
+        xml.close()
         return None
 
 
@@ -317,28 +334,6 @@ with tf.io.TFRecordWriter("train.tfrecord") as f:
             shutil.rmtree(pt)
         shutil.rmtree(pl)
         print("End Extract data in one port\n")
-
-
-dataset=tf.data.Dataset("training.tfrecord")
-
-
-
-dataset=tf.data.TFRecordDataset(["training.tfrecord"]) 
-tmp=iter(dataset)
-dataset=dataset.map(deserialize_example)
-
-
-dataset=tf.data.TFRecordDataset(["train.tfrecord"]).batch(1)
-
-for i in dataset:
-    example = deserialize_example(i)
-    break
-
-for v in example:
-    print(v)
-
-k=iter(dataset)
-
 
 ## validation 파일 추출
 # train에 사용된 항구는 제외하여 사용.
@@ -491,7 +486,20 @@ with tf.io.TFRecordWriter("test.tfrecord") as f:
 
 
 
+# check TFRecord File
+dataset=tf.data.TFRecordDataset(["train.tfrecord"]).batch(1)
 
+
+# print Instance
+for i in dataset:
+    example = deserialize_example(i)
+    break
+
+for v in example:
+    print(v)
+
+# Check Number of Instance 
+k=iter(dataset)
 
 
 
