@@ -294,7 +294,7 @@ def fetch_data2(image_path,xml_path1,xml_path2):
         xml.close()
         return None
 
-
+'''
 source = "E:/해상 객체 이미지/Training/"
 with tf.io.TFRecordWriter("train.tfrecord") as f:
     for a,b,c in zip(file_name,origin_list,label_list):
@@ -334,6 +334,8 @@ with tf.io.TFRecordWriter("train.tfrecord") as f:
             shutil.rmtree(pt)
         shutil.rmtree(pl)
         print("End Extract data in one port\n")
+'''
+
 
 ## validation 파일 추출
 # train에 사용된 항구는 제외하여 사용.
@@ -404,7 +406,10 @@ file_name_valid[:7]
 valid_origin_list[:7]
 valid_label_list[:7]
 
+
 source = "E:/해상 객체 이미지/Validation/"
+
+'''
 with tf.io.TFRecordWriter("valid.tfrecord") as f:
     for a,b,c in zip(file_name_valid[:7],valid_origin_list[:7],valid_label_list[:7]):
         for d in a:
@@ -443,8 +448,28 @@ with tf.io.TFRecordWriter("valid.tfrecord") as f:
             shutil.rmtree(pt)
         shutil.rmtree(pl)
         print("End Extract data in one port\n")
+'''
 
 
+valid_origin_list=[]
+valid_label_list=[]
+for t in file_name_valid:
+    subo_list=[]
+    subl_list=[]
+    for k in t:
+        if re.search("원천",k):
+            subo_list.append("./test/"+str.split(k,".zip")[0])
+        if re.search("라벨",k):
+            subl_list.append("./test/"+str.split(k,".zip")[0])
+    valid_origin_list.append(subo_list)
+    valid_label_list.append(subl_list)
+
+file_name_valid[:7]
+valid_origin_list[:7]
+valid_label_list[:7]
+
+
+'''
 with tf.io.TFRecordWriter("test.tfrecord") as f:
     for a,b,c in zip(file_name_valid[7:],valid_origin_list[7:],valid_label_list[7:]):
         for d in a:
@@ -483,7 +508,7 @@ with tf.io.TFRecordWriter("test.tfrecord") as f:
             shutil.rmtree(pt)
         shutil.rmtree(pl)
         print("End Extract data in one port\n")
-
+'''
 
 
 # check TFRecord File
@@ -501,6 +526,10 @@ for v in example:
 # Check Number of Instance 
 k=iter(dataset)
 
+count=0
+while True:
+    next(k)
+    count=count+1
 
 
 
