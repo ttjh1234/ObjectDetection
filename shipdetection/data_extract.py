@@ -389,6 +389,7 @@ vf3=list(vf2)
 
 file_name_valid=find_file(path,vf3)
 
+
 valid_origin_list=[]
 valid_label_list=[]
 for t in file_name_valid:
@@ -409,8 +410,14 @@ valid_label_list[:7]
 
 source = "E:/해상 객체 이미지/Validation/"
 
-'''
-with tf.io.TFRecordWriter("valid.tfrecord") as f:
+total_num=0
+sub_num=0
+flag1=0
+flag2=0
+
+
+
+with tf.io.TFRecordWriter("validation.tfrecord") as f:
     for a,b,c in zip(file_name_valid[:7],valid_origin_list[:7],valid_label_list[:7]):
         for d in a:
             if str.split(d,'.')[0] in os.listdir("./valid"):
@@ -422,12 +429,21 @@ with tf.io.TFRecordWriter("valid.tfrecord") as f:
         print("Unzip & Remove zip file in one port\n")
         c=c*len(b)
         print("Start Extract data in one port\n")
+        sub_num=0
         for pt,pl in zip(b,c):
+            if flag1==1|flag2==1:
+                break
             xml_path1=pl+'/'+os.listdir(pl)[0]+'/'
             for t1 in os.listdir(pt):
+                if flag1==1|flag2==1:
+                    break
                 for i in os.listdir(pt+'/'+t1):
+                    if flag1==1|flag2==1:
+                        break
                     subpath1=t1+'/'+i+'/'    
                     for j in os.listdir(pt+'/'+subpath1):
+                        if flag1==1|flag2==1:
+                            break
                         subpath2=subpath1+j+'/'
                         rpath=os.listdir(pt+'/'+subpath2)
                         random.shuffle(rpath)
@@ -444,11 +460,19 @@ with tf.io.TFRecordWriter("valid.tfrecord") as f:
                                 jump_var=2
                                 result=serialize_example(dic)
                                 f.write(result)
+                                total_num=total_num+1
+                                sub_num=sub_num+1
+                                if sub_num>=200|total_num>=1000:
+                                    flag1=1
+                                    if total_num>=1000:
+                                        flag2=1
+                                    break
+                                
                                                 
             shutil.rmtree(pt)
         shutil.rmtree(pl)
         print("End Extract data in one port\n")
-'''
+
 
 
 valid_origin_list=[]
@@ -469,7 +493,12 @@ valid_origin_list[:7]
 valid_label_list[:7]
 
 
-'''
+
+total_num=0
+sub_num=0
+flag1=0
+flag2=0
+
 with tf.io.TFRecordWriter("test.tfrecord") as f:
     for a,b,c in zip(file_name_valid[7:],valid_origin_list[7:],valid_label_list[7:]):
         for d in a:
@@ -482,12 +511,21 @@ with tf.io.TFRecordWriter("test.tfrecord") as f:
         print("Unzip & Remove zip file in one port\n")
         c=c*len(b)
         print("Start Extract data in one port\n")
+        sub_num=0
         for pt,pl in zip(b,c):
+            if flag1==1|flag2==1:
+                break
             xml_path1=pl+'/'+os.listdir(pl)[0]+'/'
             for t1 in os.listdir(pt):
+                if flag1==1|flag2==1:
+                        break
                 for i in os.listdir(pt+'/'+t1):
+                    if flag1==1|flag2==1:
+                        break
                     subpath1=t1+'/'+i+'/'    
                     for j in os.listdir(pt+'/'+subpath1):
+                        if flag1==1|flag2==1:
+                            break
                         subpath2=subpath1+j+'/'
                         rpath=os.listdir(pt+'/'+subpath2)
                         random.shuffle(rpath)
@@ -504,15 +542,22 @@ with tf.io.TFRecordWriter("test.tfrecord") as f:
                                 jump_var=2
                                 result=serialize_example(dic)
                                 f.write(result)
+                                total_num=total_num+1
+                                sub_num=sub_num+1
+                                if sub_num>=200|total_num>=1000:
+                                    flag1=1
+                                    if total_num>=1000:
+                                        flag2=1
+                                    break
                                                 
             shutil.rmtree(pt)
         shutil.rmtree(pl)
         print("End Extract data in one port\n")
-'''
+
 
 
 # check TFRecord File
-dataset=tf.data.TFRecordDataset(["train.tfrecord"]).batch(1)
+dataset=tf.data.TFRecordDataset(["validation.tfrecord"]).batch(1)
 
 
 # print Instance
@@ -526,12 +571,16 @@ for v in example:
 # Check Number of Instance 
 k=iter(dataset)
 
+'''
 count=0
 while True:
     next(k)
     count=count+1
+'''
 
-
-
-
+for i in range(10):
+    for j in range(5):
+        print(i,j)
+        if j==3:
+            break
 
