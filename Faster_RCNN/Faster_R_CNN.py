@@ -723,8 +723,7 @@ run.stop()
 
 
 
-'''
-frcn_model.load_weights('./model/frcn_FAS-29.h5')
+frcn_model.load_weights('./model/frcn_FAS-37.h5')
 
 for data in voc_valid3:
     test=data
@@ -789,21 +788,10 @@ score=tf.gather_nd(pred_obj,indices=bgind)
 
 coord=tf.gather_nd(bbox,indices=bgind)
 
-proposed=tf.image.non_max_suppression(coord,score,100,iou_threshold=1.0)
+proposed=tf.image.non_max_suppression(coord,score,30,iou_threshold=0.1)
 v_pdata = tf.gather(coord, proposed)
 
-
-
 vision_valid(tf.reshape(test['image'],(500,500,3)),v_pdata)
-
-pred_obj_valid.shape
-
-argindex
-
-
-pred_obj_valid
-
-test
 
 t1=bbox[0]
 
@@ -821,5 +809,5 @@ for i,j,k in zip(bbox2,pred_obj,test['image']):
 
 
 voc_train3=voc_train2.batch(2).prefetch(2)
-'''
+
 
