@@ -58,6 +58,7 @@ voc_train2=voc_train.map(lambda feature: data_preprocess(feature))
 voc_test2=voc_test.map(lambda feature: data_preprocess(feature))
 voc_valid2=voc_valid.map(lambda feature: data_preprocess(feature))
 
+
 # Utils
 
 # make_anchor : generating anchor box 
@@ -99,7 +100,6 @@ def make_anchor():
     anchor_box=tf.transpose(anchor_box,[0,1,3,2])
     anchor_box=tf.cast(anchor_box,dtype=tf.float32)
     return anchor_box
-
 
 # making_rpn_train : Old preprocess
 
@@ -244,7 +244,7 @@ def patch_batch(data,anchor_box):
     positive_pos=tf.where(iou>=0.7,1,0)
     #negative_pos=tf.where(iou<0.3,1,0)
     #unuse_pos=tf.where(tf.logical_and(iou<0.7,iou>=0.3),1,0)
-      
+    
     nop=tf.reduce_sum(positive_pos)
     nop2=tf.clip_by_value(nop,tf.constant(0),tf.constant(128))
 
@@ -285,6 +285,7 @@ def patch_batch(data,anchor_box):
     return image,batch_label,batch_anchor,batch_gt,gt_list,batch_pos,batch_reg_gt
     # 추출해야할 요소 : Anchor_box의 좌표정보와 대응되는 gt_box의 좌표정보. 
     # making_rpn_train에서 iou정보를 이용해서 마지막 차원에 몇번째 gt_box와 대응되는지 알아야함.
+
 
 def inverse_trans(anchor_box,pred_reg):
     pred_reg2=tf.reshape(pred_reg,(-1,31,31,9,4))
@@ -368,7 +369,7 @@ class Loss_bbr(tf.keras.losses.Loss):
         return {**base_config}
 
 rpn_model.load_weights("./model/rpn_FAS-8.h5")
-'''
+
 epoch=100
 optimizer=tf.keras.optimizers.Adam(learning_rate=1e-5)
 anchor_box=make_anchor()
@@ -383,7 +384,7 @@ valid_set=voc_valid2.take(5)
 #image_batch=5
 
 voc_train3=voc_train2.map(lambda x,y=anchor_box :patch_batch(x,y))
-voc_train4=voc_train3.batch(5).prefetch(5)
+voc_train4=voc_train3.batch(1).prefetch(1)
 
 voc_valid3=voc_valid2.map(lambda x,y=anchor_box :patch_batch(x,y))
 voc_valid4=voc_valid3.batch(1).prefetch(1)
@@ -409,9 +410,11 @@ for epo in range(1,epoch+1):
       pred_obj=tf.expand_dims(pred_obj,2)  
       objectness_loss=loss_cls(data[1],pred_obj) # batch_label(objectness) :(5,256,1) vs pred_obj : (5,256,1) 
       bounding_box_loss=loss_bbr(y_t,y_p)
-      train_sub_loss=tf.add_n([objectness_loss/256]+[(bounding_box_loss*4/961)])  
+      train_sub_loss=tf.add_n([objectness_loss/256]+[(bounding_box_loss*3.75/961)])  
     
     run["train/iter_loss"].log(train_sub_loss)
+    run["train/obj_loss"].log(objectness_loss)
+    run["train/reg_loss"].log(bounding_box_loss)
     gradients=tape.gradient(train_sub_loss,rpn_model.trainable_variables)
     optimizer.apply_gradients(zip(gradients,rpn_model.trainable_variables))
     train_total_loss=tf.add(train_total_loss,train_sub_loss)
@@ -429,9 +432,12 @@ for epo in range(1,epoch+1):
     pred_obj_valid=tf.expand_dims(pred_obj_valid,2)  
     objectness_loss=loss_cls(data[1],pred_obj_valid) # batch_label(objectness) :(5,256,1) vs pred_obj : (5,256,1) 
     bounding_box_loss=loss_bbr(y_t_valid,y_p_valid)
-    valid_sub_loss=tf.add_n([objectness_loss/256]+[(bounding_box_loss*4/961)])
+    valid_sub_loss=tf.add_n([objectness_loss/256]+[(bounding_box_loss*3.75/961)])
     valid_total_loss=tf.add(valid_total_loss,valid_sub_loss)
-
+    run["valid/obj_loss"].log(objectness_loss)
+    run["valid/reg_loss"].log(bounding_box_loss)
+    run["valid/iter_loss"].log(valid_sub_loss)
+    
   valid_loss_list.append(valid_total_loss/126)
   run["valid/epoch_loss"].log(valid_total_loss/126)
 
@@ -467,7 +473,7 @@ rpn_model.load_weights(f"./model/rpn_{url}.h5")
 for valid in valid_set:
   valid_result(valid,iou=0.5,max_n=10)
 
-'''
+
 # ----------------------------------------------------------------------- #
 
 ## Implement NMS + ROI 풀링 ##
