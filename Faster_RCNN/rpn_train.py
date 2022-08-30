@@ -2,6 +2,7 @@
 
 # Library list
 
+from re import I
 import subprocess
 import sys
 
@@ -211,6 +212,11 @@ def making_loss_data(y_true,y_pred,anchor):
 # patch_batch : data preprocess for rpn model
 # usage : tfds map function 
 
+for i in voc_train2:
+    data=i
+    break
+
+anchor_box=make_anchor()
 def patch_batch(data,anchor_box):
     image=data['image']
     gt_box=data['bbox']
@@ -236,6 +242,10 @@ def patch_batch(data,anchor_box):
 
     # 추가로 해야 할 부분
     # 도출된 iou값을 기준으로 index를 알아와서 positive와 negative 구분하기.
+    pos=tf.math.argmax(iou,axis=1)
+    pos2=tf.gather_nd(iou,indices=tf.expand_dims(pos,axis=1),batch_dims=1)
+    tf.where(pos2>=0.7)
+    
     positive_index=tf.where(iou>=0.7)
     iou_positive=tf.where(iou>=0.7)
     negative_index=tf.where(iou<0.3)
@@ -271,7 +281,7 @@ def patch_batch(data,anchor_box):
     gt_list=tf.gather(gt_list,indices=tindex)
     batch_gt=tf.gather(gt_box,indices=gt_list)
     batch_pos=tf.gather(batch_pos,indices=tindex)
-    
+
     # 상관없는 부분
     w_a=batch_anchor[:,3]-batch_anchor[:,1]
     h_a=batch_anchor[:,2]-batch_anchor[:,0]
@@ -389,6 +399,11 @@ valid_set=voc_valid2.take(5)
 
 voc_train3=voc_train2.map(lambda x,y=anchor_box :patch_batch(x,y))
 voc_train4=voc_train3.batch(1).prefetch(1)
+
+for i in voc_train4:
+    print(tf.reduce_sum(i[1]))
+
+
 
 voc_valid3=voc_valid2.map(lambda x,y=anchor_box :patch_batch(x,y))
 voc_valid4=voc_valid3.batch(1).prefetch(1)
