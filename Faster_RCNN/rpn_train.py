@@ -21,6 +21,7 @@ import matplotlib.pyplot as plt
 import cv2
 from tqdm import tqdm
 import os
+from PIL import Image
 
 run = neptune.init(
     project="sungsu/Faster-R-CNN",
@@ -206,7 +207,7 @@ def making_valid_positive(anchor_box,gt_box,iou_threshold):
 
 
 # vision_valid : print image and bbox
-def vision_valid(image,gt_box):
+def vision_valid(image,gt_box,visable=0):
     img_rgb_copy = image.numpy().copy()/255.0
     green_rgb = (125, 255, 51)
     for rect in gt_box:
@@ -223,8 +224,10 @@ def vision_valid(image,gt_box):
     plt.figure(figsize=(8, 8))
     plt.imshow(img_rgb_copy)
     plt.show()
-    
-    return img_rgb_copy
+    if visable==1:
+        img=(img_rgb_copy*255).astype("uint8")
+        img=Image.fromarray(img)
+        run['validation-fig'].upload(img)
 
 
 #  making_loss_data : For vision model performance, preprocess valid set
@@ -345,7 +348,7 @@ def inverse_trans(anchor_box,pred_reg):
     pred_value=tf.stack([y,x,y_max,x_max],axis=4)
     return pred_value
 
-def valid_result(valid,iou=0.5,max_n=300):
+def valid_result(valid,iou=0.5,max_n=300,visable=0):
     valid_reg,valid_cls=rpn_model(tf.expand_dims(valid["image"],axis=0),training=False)
     print("GT Results")
     vision_valid(valid["image"],valid["bbox"])
@@ -359,14 +362,13 @@ def valid_result(valid,iou=0.5,max_n=300):
         v_cls=tf.gather_nd(tf.reshape(valid_cls,(31,31,9,1)),indices=tf.unstack(v_pind[:,:3]))
         proposed_box=tf.image.non_max_suppression(v_pdata,tf.reshape(v_cls,(-1)),max_n,iou_threshold=0.5)
         v_pdata = tf.gather(v_pdata, proposed_box)
-        image=vision_valid(valid["image"],v_pdata)
-        return image
+        vision_valid(valid["image"],v_pdata,visable)
 
 # RPN Network Performance test
-def valid_result2(valid,iou=0.5,max_n=300):
+def valid_result2(valid,iou=0.5,max_n=300,visable=0):
     valid_reg,valid_cls=rpn_model(tf.expand_dims(valid["image"],axis=0),training=False)
     print("GT Results")
-    vision_valid(valid["image"],valid["bbox"])
+    vision_valid(valid["image"],valid["bbox"],visable)
     print("Model Results")
     valid_reg2=inverse_trans(anchor_box,valid_reg)
     valid_reg3=tf.reshape(valid_reg2,(-1,4))
@@ -376,7 +378,7 @@ def valid_result2(valid,iou=0.5,max_n=300):
     proposed_box=tf.image.non_max_suppression_with_scores(valid_reg3,t2,max_n,iou_threshold=iou)
     print(proposed_box[1])
     v_pdata = tf.gather(valid_reg3, proposed_box[0])
-    vision_valid(valid["image"],v_pdata)
+    vision_valid(valid["image"],v_pdata,visable)
 
 
 # RPN Network
@@ -490,8 +492,7 @@ for epo in range(1,epoch+1):
 
     if epo%10==1:
         for valid in valid_set:  
-            performace_img=valid_result(valid,iou=0.5,max_n=300)
-            run["images"].log(performace_img)
+            valid_result2(valid,iou=0.5,max_n=10,visable=1)
         
     if valid_loss_list[best_valid_loss_index]>valid_loss_list[epo]:
         best_valid_loss_index=epo
