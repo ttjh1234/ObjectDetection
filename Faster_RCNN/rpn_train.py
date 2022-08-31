@@ -347,6 +347,56 @@ def valid_result2(valid,iou=0.5,max_n=300):
     v_pdata = tf.gather(valid_reg3, proposed_box[0])
     vision_valid(valid["image"],v_pdata)
 
+
+def augmentation_data(img,label,bbox):
+
+    '''
+    Input Data 
+    img : (B,500,500,3)
+    label : (B,42,)
+    bbox : (B,42,4)
+    
+    Return 
+    image_flip : (B,500,500,3)
+    label : (B,42)
+    bbox_flip : (B,42,4)
+
+    '''
+
+    image=tf.image.flip_left_right(img)
+    label=label
+    xmin=bbox[:,:,1]
+    xmax=bbox[:,:,3]
+    bbox[:,:,1]=1-xmax
+    bbox[:,:,3]=1-xmin
+
+    return image,label,bbox
+
+
+def non_augmentation_data(img,label,bbox):
+    return img,label,bbox
+
+
+
+def random_augmentation(feature):
+    img=feature['image']
+    label=feature['objects']['label']
+    bbox=feature['objects']['bbox']
+    image=tf.image.resize(img,[500,500])
+    paddings1 = [[0, 42-tf.shape(bbox)[0]], [0, 0]]
+    bbox = tf.pad(bbox, paddings1, 'CONSTANT', constant_values=0)
+    bbox=tf.reshape(bbox,(42,4))
+    paddings2 = [[0,42-tf.shape(label)[0]]]
+    label = tf.pad(label, paddings2, 'CONSTANT', constant_values=0)
+    label= tf.reshape(label,(42,))
+    num=tf.random.uniform(shape=[tf.shape(image)[0]])
+    image,label,bbox=tf.cond(num>0.5,augmentation_data,non_augmentation_data)
+    
+    
+    tf.random.uniform(1,dtype=tf.int32)
+    
+
+    return {"image":image,"bbox":bbox,"label":label}
 # RPN Network
 
 base_model = VGG16(include_top=False, input_shape=(500, 500, 3))
