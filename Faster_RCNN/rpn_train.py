@@ -2,7 +2,6 @@
 
 # Library list
 
-from re import I
 import subprocess
 import sys
 
@@ -54,7 +53,41 @@ def data_preprocess(feature):
 
     return {"image":image,"bbox":bbox,"label":label}
 
-voc_train2=voc_train.map(lambda feature: data_preprocess(feature))
+
+
+def augmentation_data(img,label,bbox):
+
+    image=tf.image.flip_left_right(img)
+    xmin=tf.reshape((1-bbox[:,3]),(-1,1))
+    xmax=tf.reshape((1-bbox[:,1]),(-1,1))
+    ymin=tf.reshape(bbox[:,0],(-1,1))
+    ymax=tf.reshape(bbox[:,2],(-1,1))
+    bbox_aug=tf.concat([ymin,xmin,ymax,xmax],axis=1)
+
+    return [image,label,bbox_aug]
+
+
+def random_augmentation(feature):
+    img=feature['image']
+    label=feature['objects']['label']
+    bbox=feature['objects']['bbox']
+    image=tf.image.resize(img,[500,500])
+    num=tf.random.uniform([])
+    if num>0.5:
+        image,label,bbox=augmentation_data(image,label,bbox)    
+    paddings1 = [[0, 42-tf.shape(bbox)[0]], [0, 0]]
+    bbox = tf.pad(bbox, paddings1, 'CONSTANT', constant_values=0)
+    bbox=tf.reshape(bbox,(42,4))
+    paddings2 = [[0,42-tf.shape(label)[0]]]
+    label = tf.pad(label, paddings2, 'CONSTANT', constant_values=0)
+    label= tf.reshape(label,(42,))
+
+    return {"image":image,"bbox":bbox,"label":label}
+
+voc_train2=voc_train.map(lambda feature: random_augmentation(feature))
+
+#voc_train2=voc_train.map(lambda feature: data_preprocess(feature))
+
 voc_test2=voc_test.map(lambda feature: data_preprocess(feature))
 voc_valid2=voc_valid.map(lambda feature: data_preprocess(feature))
 
@@ -190,6 +223,8 @@ def vision_valid(image,gt_box):
     plt.figure(figsize=(8, 8))
     plt.imshow(img_rgb_copy)
     plt.show()
+    
+    return img_rgb_copy
 
 
 #  making_loss_data : For vision model performance, preprocess valid set
@@ -212,11 +247,6 @@ def making_loss_data(y_true,y_pred,anchor):
 # patch_batch : data preprocess for rpn model
 # usage : tfds map function 
 
-for i in voc_train2:
-    data=i
-    break
-
-anchor_box=make_anchor()
 def patch_batch(data,anchor_box):
     image=data['image']
     gt_box=data['bbox']
@@ -329,7 +359,8 @@ def valid_result(valid,iou=0.5,max_n=300):
         v_cls=tf.gather_nd(tf.reshape(valid_cls,(31,31,9,1)),indices=tf.unstack(v_pind[:,:3]))
         proposed_box=tf.image.non_max_suppression(v_pdata,tf.reshape(v_cls,(-1)),max_n,iou_threshold=0.5)
         v_pdata = tf.gather(v_pdata, proposed_box)
-        vision_valid(valid["image"],v_pdata)
+        image=vision_valid(valid["image"],v_pdata)
+        return image
 
 # RPN Network Performance test
 def valid_result2(valid,iou=0.5,max_n=300):
@@ -346,6 +377,7 @@ def valid_result2(valid,iou=0.5,max_n=300):
     print(proposed_box[1])
     v_pdata = tf.gather(valid_reg3, proposed_box[0])
     vision_valid(valid["image"],v_pdata)
+
 
 # RPN Network
 
@@ -381,11 +413,11 @@ class Loss_bbr(tf.keras.losses.Loss):
 
 epoch=300
 step=tf.Variable(0,trainable=False)
-boundary=[60000,80000]
-values=[1e-3,1e-4,1e-5]
-learning_rate_fn = tf.keras.optimizers.schedules.PiecewiseConstantDecay(
-    boundary, values)
-optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate_fn(step))
+#boundary=[60000,80000]
+#values=[1e-3,1e-4,1e-5]
+#learning_rate_fn = tf.keras.optimizers.schedules.PiecewiseConstantDecay(boundary, values)
+#optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate_fn(step))
+optimizer=tf.keras.optimizers.Adam(learning_rate=1e-5)
 anchor_box=make_anchor()
 train_loss_list=[10]
 valid_loss_list=[10]
@@ -398,19 +430,12 @@ valid_set=voc_valid2.take(5)
 #image_batch=5
 
 voc_train3=voc_train2.map(lambda x,y=anchor_box :patch_batch(x,y))
-voc_train4=voc_train3.batch(1).prefetch(1)
-
-for i in voc_train4:
-    print(tf.reduce_sum(i[1]))
-
-
+voc_train4=voc_train3.batch(2).prefetch(2)
 
 voc_valid3=voc_valid2.map(lambda x,y=anchor_box :patch_batch(x,y))
 voc_valid4=voc_valid3.batch(1).prefetch(1)
 
 # train_rpn_model
-
-
 
 for epo in range(1,epoch+1):
   print("Epoch {}/{}".format(epo,epoch))
@@ -429,7 +454,8 @@ for epo in range(1,epoch+1):
       pred_obj=tf.expand_dims(pred_obj,2)  
       objectness_loss=loss_cls(data[1],pred_obj) # batch_label(objectness) :(5,256,1) vs pred_obj : (5,256,1) 
       bounding_box_loss=loss_bbr(y_t,y_p)
-      train_sub_loss=tf.add_n([objectness_loss/256]+[(bounding_box_loss*3.75/961)])  
+      #train_sub_loss=tf.add_n([objectness_loss/256]+[(bounding_box_loss*3.75/961)])
+      train_sub_loss=tf.add_n([objectness_loss]+[bounding_box_loss])
     
     run["train/iter_loss"].log(train_sub_loss)
     run["train/obj_loss"].log(objectness_loss)
@@ -437,8 +463,8 @@ for epo in range(1,epoch+1):
     gradients=tape.gradient(train_sub_loss,rpn_model.trainable_variables)
     optimizer.apply_gradients(zip(gradients,rpn_model.trainable_variables))
     train_total_loss=tf.add(train_total_loss,train_sub_loss)
-  train_loss_list.append(tf.reduce_sum(train_total_loss)/977)
-  run["train/epoch_loss"].log(tf.reduce_sum(train_total_loss)/977)
+  train_loss_list.append(tf.reduce_sum(train_total_loss)/2443)
+  run["train/epoch_loss"].log(tf.reduce_sum(train_total_loss)/2443)
 
   for data in tqdm(voc_valid4):
     #image,batch_label,batch_anchor,batch_gt,gt_list,batch_pos,batch_reg_gt
@@ -451,7 +477,8 @@ for epo in range(1,epoch+1):
     pred_obj_valid=tf.expand_dims(pred_obj_valid,2)  
     objectness_loss=loss_cls(data[1],pred_obj_valid) # batch_label(objectness) :(5,256,1) vs pred_obj : (5,256,1) 
     bounding_box_loss=loss_bbr(y_t_valid,y_p_valid)
-    valid_sub_loss=tf.add_n([objectness_loss/256]+[(bounding_box_loss*3.75/961)])
+    #valid_sub_loss=tf.add_n([objectness_loss/256]+[(bounding_box_loss*3.75/961)])
+    valid_sub_loss=tf.add_n([objectness_loss]+[bounding_box_loss])
     valid_total_loss=tf.add(valid_total_loss,valid_sub_loss)
     run["valid/obj_loss"].log(objectness_loss)
     run["valid/reg_loss"].log(bounding_box_loss)
@@ -462,8 +489,9 @@ for epo in range(1,epoch+1):
 
 
   if epo%10==1:
-    for valid in valid_set:
-      valid_result(valid,iou=0.5,max_n=300)
+    for valid in valid_set:  
+      performace_img=valid_result(valid,iou=0.5,max_n=300)
+      run["images"].log(performace_img)
       
   if valid_loss_list[best_valid_loss_index]>valid_loss_list[epo]:
     best_valid_loss_index=epo
