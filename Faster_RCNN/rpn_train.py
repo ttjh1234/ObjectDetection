@@ -227,7 +227,7 @@ def vision_valid(image,gt_box,visable=0):
     if visable==1:
         img=(img_rgb_copy*255).astype("uint8")
         img=Image.fromarray(img)
-        run['validation-fig'].upload(img)
+        run["outputs/rpn_valid"].log(neptune.types.File.as_image(img))
 
 
 #  making_loss_data : For vision model performance, preprocess valid set
@@ -275,22 +275,28 @@ def patch_batch(data,anchor_box):
 
     # 추가로 해야 할 부분
     # 도출된 iou값을 기준으로 index를 알아와서 positive와 negative 구분하기.
-    pos=tf.math.argmax(iou,axis=1)
-    pos2=tf.gather_nd(iou,indices=tf.expand_dims(pos,axis=1),batch_dims=1)
-    tf.where(pos2>=0.7)
+    pos=tf.expand_dims(tf.math.argmax(iou,axis=1),axis=1)
+    ind_list=tf.expand_dims(tf.range(0,8649,dtype=tf.int64),axis=1)
+    ind=tf.concat([ind_list,pos],axis=1)
     
-    positive_index=tf.where(iou>=0.7)
-    iou_positive=tf.where(iou>=0.7)
+    pos2=tf.gather_nd(iou,indices=ind,batch_dims=0)
+    survive_ind=tf.where(pos2>0.3)
+    ind2=tf.gather_nd(ind,indices=survive_ind)
+    #tf.where(tf.gather_nd(iou,indices=ind2)>0.7)
+    
+    #positive_index=tf.where(iou>=0.7)
+    #iou_positive=tf.where(iou>=0.7)
     negative_index=tf.where(iou<0.3)
     iou_negative=tf.where(iou<0.3)
     positive_pos=tf.where(iou>=0.7,1,0)
     #negative_pos=tf.where(iou<0.3,1,0)
     #unuse_pos=tf.where(tf.logical_and(iou<0.7,iou>=0.3),1,0)
     
-    nop=tf.reduce_sum(positive_pos)
+    #nop=tf.reduce_sum(positive_pos)
+    nop=tf.shape(ind2)[0]
     nop2=tf.clip_by_value(nop,tf.constant(0),tf.constant(128))
 
-    positive_ind=tf.stack([(positive_index[:,0]//9)//31,(positive_index[:,0]//9)%31,positive_index[:,0]%9,iou_positive[:,1]],axis=1)
+    positive_ind=tf.stack([(ind2[:,0]//9)//31,(ind2[:,0]//9)%31,ind2[:,0]%9,ind2[:,1]],axis=1)
     negative_ind=tf.stack([(negative_index[:,0]//9)//31,(negative_index[:,0]//9)%31,negative_index[:,0]%9,iou_negative[:,1]],axis=1)
 
     pindex=tf.random.shuffle(positive_ind,name='positive_shuffle')[:nop2]
@@ -365,7 +371,7 @@ def valid_result(valid,iou=0.5,max_n=300,visable=0):
         vision_valid(valid["image"],v_pdata,visable)
 
 # RPN Network Performance test
-def valid_result2(valid,iou=0.5,max_n=300,visable=0):
+def valid_result2(valid,iou=0.3,max_n=300,visable=0):
     valid_reg,valid_cls=rpn_model(tf.expand_dims(valid["image"],axis=0),training=False)
     print("GT Results")
     vision_valid(valid["image"],valid["bbox"],visable)
@@ -434,6 +440,7 @@ valid_set=voc_valid2.take(5)
 voc_train3=voc_train2.map(lambda x,y=anchor_box :patch_batch(x,y))
 voc_train4=voc_train3.batch(2).prefetch(2)
 
+
 voc_valid3=voc_valid2.map(lambda x,y=anchor_box :patch_batch(x,y))
 voc_valid4=voc_valid3.batch(1).prefetch(1)
 
@@ -490,9 +497,9 @@ for epo in range(1,epoch+1):
     run["valid/epoch_loss"].log(valid_total_loss/126)
 
 
-    if epo%10==1:
+    if epo%2==1:
         for valid in valid_set:  
-            valid_result2(valid,iou=0.5,max_n=10,visable=1)
+            valid_result2(valid,iou=0.5,max_n=5,visable=1)
         
     if valid_loss_list[best_valid_loss_index]>valid_loss_list[epo]:
         best_valid_loss_index=epo
