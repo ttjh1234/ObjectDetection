@@ -324,10 +324,10 @@ def patch_batch(data,anchor_box):
     # 상관없는 부분
     w_a=batch_anchor[:,3]-batch_anchor[:,1]
     h_a=batch_anchor[:,2]-batch_anchor[:,0]
-    t_x_star=(batch_gt[:,1]-batch_anchor[:,1])/w_a
-    t_y_star=(batch_gt[:,0]-batch_anchor[:,0])/h_a
-    t_w_star=tf.math.log((batch_gt[:,3]-batch_gt[:,1])/w_a)
-    t_h_star=tf.math.log((batch_gt[:,2]-batch_gt[:,0])/h_a)
+    t_x_star=(batch_gt[:,1]-batch_anchor[:,1])/w_a/0.1
+    t_y_star=(batch_gt[:,0]-batch_anchor[:,0])/h_a/0.1
+    t_w_star=tf.math.log((batch_gt[:,3]-batch_gt[:,1])/w_a)/0.2
+    t_h_star=tf.math.log((batch_gt[:,2]-batch_gt[:,0])/h_a)/0.2
     batch_reg_gt=tf.stack([t_x_star,t_y_star,t_w_star,t_h_star],axis=1)
 
     return image,batch_label,batch_anchor,batch_gt,gt_list,batch_pos,batch_reg_gt
@@ -341,10 +341,10 @@ def inverse_trans(anchor_box,pred_reg):
     cal_anc=tf.expand_dims(anchor_box,axis=0)
     w_a=cal_anc[:,:,:,:,3]-cal_anc[:,:,:,:,1]
     h_a=cal_anc[:,:,:,:,2]-cal_anc[:,:,:,:,0]  
-    x=pred_reg2[:,:,:,:,0]*w_a+cal_anc[:,:,:,:,0]
-    y=pred_reg2[:,:,:,:,1]*h_a+cal_anc[:,:,:,:,1]
-    w=tf.math.exp(pred_reg2[:,:,:,:,2])*w_a
-    h=tf.math.exp(pred_reg2[:,:,:,:,3])*h_a
+    x=pred_reg2[:,:,:,:,0]*w_a*0.1+cal_anc[:,:,:,:,1]
+    y=pred_reg2[:,:,:,:,1]*h_a*0.1+cal_anc[:,:,:,:,0]
+    w=tf.math.exp(pred_reg2[:,:,:,:,2]*0.2)*w_a
+    h=tf.math.exp(pred_reg2[:,:,:,:,3]*0.2)*h_a
     x_max=x+w
     y_max=y+h
     y=tf.clip_by_value(y,0,1)
@@ -382,8 +382,9 @@ def valid_result2(valid,iou=0.3,max_n=300,visable=0):
     v_cls=tf.reshape(valid_cls,(-1))
     t2=tf.where(v_cls>=0.5,v_cls,0.0)
     proposed_box=tf.image.non_max_suppression_with_scores(valid_reg3,t2,max_n,iou_threshold=iou)
-    print(proposed_box[1])
+    fgind=tf.where(proposed_box[1]>=0.5)
     v_pdata = tf.gather(valid_reg3, proposed_box[0])
+    v_pdata= tf.gather_nd(v_pdata,indices=fgind)
     vision_valid(valid["image"],v_pdata,visable)
 
 
@@ -397,7 +398,6 @@ rpn_cls_output = Conv2D(9, (1, 1), activation="sigmoid",kernel_initializer=initi
 rpn_reg_output = Conv2D(9 * 4, (1, 1), activation="linear",kernel_initializer=initializers, name="rpn_reg")(output)
 rpn_model = Model(inputs=base_model.input, outputs=[rpn_reg_output, rpn_cls_output])
 rpn_model.summary()
-
 
 
 # Huber Loss
@@ -417,9 +417,9 @@ class Loss_bbr(tf.keras.losses.Loss):
         base_config=super().get_config()
         return {**base_config}
 
-#rpn_model.load_weights("./model/rpn_FAS-8.h5")
+#rpn_model.load_weights("./model/rpn_FAS-48.h5")
 
-epoch=300
+epoch=1000
 step=tf.Variable(0,trainable=False)
 #boundary=[60000,80000]
 #values=[1e-3,1e-4,1e-5]
@@ -438,7 +438,7 @@ valid_set=voc_valid2.take(5)
 #image_batch=5
 
 voc_train3=voc_train2.map(lambda x,y=anchor_box :patch_batch(x,y))
-voc_train4=voc_train3.batch(2).prefetch(2)
+voc_train4=voc_train3.batch(16).prefetch(16)
 
 
 voc_valid3=voc_valid2.map(lambda x,y=anchor_box :patch_batch(x,y))
@@ -464,16 +464,16 @@ for epo in range(1,epoch+1):
             objectness_loss=loss_cls(data[1],pred_obj) # batch_label(objectness) :(5,256,1) vs pred_obj : (5,256,1) 
             bounding_box_loss=loss_bbr(y_t,y_p)
             #train_sub_loss=tf.add_n([objectness_loss/256]+[(bounding_box_loss*3.75/961)])
-            train_sub_loss=tf.add_n([objectness_loss]+[bounding_box_loss])
+            train_sub_loss=tf.add_n([2*objectness_loss]+[bounding_box_loss])
             
         run["train/iter_loss"].log(train_sub_loss)
-        run["train/obj_loss"].log(objectness_loss)
+        run["train/obj_loss"].log(2*objectness_loss)
         run["train/reg_loss"].log(bounding_box_loss)
         gradients=tape.gradient(train_sub_loss,rpn_model.trainable_variables)
         optimizer.apply_gradients(zip(gradients,rpn_model.trainable_variables))
         train_total_loss=tf.add(train_total_loss,train_sub_loss)
-    train_loss_list.append(tf.reduce_sum(train_total_loss)/2443)
-    run["train/epoch_loss"].log(tf.reduce_sum(train_total_loss)/2443)
+    train_loss_list.append(tf.reduce_sum(train_total_loss)/306)
+    run["train/epoch_loss"].log(tf.reduce_sum(train_total_loss)/306)
 
     for data in tqdm(voc_valid4):
         #image,batch_label,batch_anchor,batch_gt,gt_list,batch_pos,batch_reg_gt
@@ -487,9 +487,9 @@ for epo in range(1,epoch+1):
         objectness_loss=loss_cls(data[1],pred_obj_valid) # batch_label(objectness) :(5,256,1) vs pred_obj : (5,256,1) 
         bounding_box_loss=loss_bbr(y_t_valid,y_p_valid)
         #valid_sub_loss=tf.add_n([objectness_loss/256]+[(bounding_box_loss*3.75/961)])
-        valid_sub_loss=tf.add_n([objectness_loss]+[bounding_box_loss])
+        valid_sub_loss=tf.add_n([2*objectness_loss]+[bounding_box_loss])
         valid_total_loss=tf.add(valid_total_loss,valid_sub_loss)
-        run["valid/obj_loss"].log(objectness_loss)
+        run["valid/obj_loss"].log(2*objectness_loss)
         run["valid/reg_loss"].log(bounding_box_loss)
         run["valid/iter_loss"].log(valid_sub_loss)
         
@@ -497,9 +497,9 @@ for epo in range(1,epoch+1):
     run["valid/epoch_loss"].log(valid_total_loss/126)
 
 
-    if epo%2==1:
+    if True:
         for valid in valid_set:  
-            valid_result2(valid,iou=0.5,max_n=5,visable=1)
+            valid_result2(valid,iou=0.2,max_n=10,visable=1)
         
     if valid_loss_list[best_valid_loss_index]>valid_loss_list[epo]:
         best_valid_loss_index=epo
@@ -508,7 +508,7 @@ for epo in range(1,epoch+1):
     else:
         revision_count=revision_count+1
     
-    if revision_count>=10:
+    if revision_count>=50:
         break
     print("Train_Loss = {}, Valid_Loss={}, revision_count = {}".format(train_loss_list[epo],valid_loss_list[epo],revision_count))
 
@@ -519,3 +519,7 @@ rpn_model.save_weights(f"./model/rpn_{url}.h5")
 run["model"].upload(f"./model/rpn_{url}.h5")
 
 run.stop()
+
+
+
+
