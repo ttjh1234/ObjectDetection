@@ -373,9 +373,6 @@ def construct_rpn():
     rpn_model.load_weights("./model/rpn_FAS-48.h5")
     return rpn_model
 
-rpn_model=construct_rpn()
-
-
 ## Implement NMS + ROI 풀링 ##
 
 #pred_reg,pred_obj
@@ -395,29 +392,6 @@ def construct_frcn():
     frcn_model=Model(inputs=inputs,outputs=[reg_layer,cls_layer],name='Faster_RCNN_Model')
     frcn_model.load_weights("./model/frcn_FAS-57.h5")
     return frcn_model
-
-frcn_model=construct_frcn()
-frcn_model.summary()
-#frcn_model.load_weights("./model/frcn_FAS-57.h5")
-
-epoch=3000
-optimizer=tf.keras.optimizers.Adam(learning_rate=1e-5)
-train_loss_list=[10]
-valid_loss_list=[10]
-best_valid_loss_index=0
-revision_count=0
-loss_cls=tf.keras.losses.CategoricalCrossentropy()
-loss_bbr=Loss_bbr()
-anchor_box=make_anchor()
-valid_set=voc_valid2.take(5).batch(1)
-
-fmap_ext = tf.keras.Model(rpn_model.input, rpn_model.get_layer('conv2d').output)
-
-voc_train3=voc_train2.batch(2).prefetch(2)
-voc_valid3=voc_valid2.batch(1).prefetch(1)
-
-rpn_model.summary()
-rpn_model.get_layer()
 
 def process_fmap(fmap,score,coord,anchor_box):
     pred_obj=tf.reshape(score,(tf.shape(fmap)[0],-1))
@@ -452,23 +426,13 @@ class full_model(tf.keras.Model):
     
         return output
 
-for i in voc_train3:
-    break
-
-img=i['image']
-
-mymodel=full_model()
-mymodel(img,train=False)
-
-mymodel.summary()
         
-def making_frcnn_input(data,train=False):
+def making_frcnn_input(data,model1):
 
     img=data['image']
     gt_box=data['bbox']
     label=data['label']
-    pred_reg,pred_obj=rpn_model(img,training=False)
-    fmap=fmap_ext(img)
+    fmap,pred_reg,pred_obj=model1(img,training=False)
     pred_obj2=tf.reshape(pred_obj,(tf.shape(fmap)[0],-1))
     a,b=tf.math.top_k(pred_obj2,k=6000)    
     candidate=tf.stack([(b//9)//31,(b//9)%31,b%9],axis=2)
@@ -592,8 +556,153 @@ def making_frcnn_input(data,train=False):
     '''
     return crop_fmap,gt_label2,gt_mask2,gt_coord2,proposed,tindex
 
+epoch=3000
+optimizer=tf.keras.optimizers.Adam(learning_rate=1e-5)
+train_loss_list=[10]
+valid_loss_list=[10]
+best_valid_loss_index=0
+revision_count=0
+loss_cls=tf.keras.losses.CategoricalCrossentropy()
+loss_bbr=Loss_bbr()
+anchor_box=make_anchor()
+valid_set=voc_valid2.take(5).batch(1)
+mymodel=full_model()
+
+voc_train3=voc_train2.batch(2).prefetch(2)
+voc_valid3=voc_valid2.batch(1).prefetch(1)
 
 
+for epo in range(1,epoch+1):
+    print("Epoch {}/{}".format(epo,epoch))
+    train_total_loss=tf.constant(0,dtype=tf.float32)
+    valid_total_loss=tf.constant(0,dtype=tf.float32)
+
+    for data in tqdm(voc_train3):
+      # data : {RoI Fmap (B,2000,14,14,512), Label (B,2000,21), gt_mask (B,2000), gt_coord (B,2000,4)}
+      # Reg Mask Implement
+
+        rpn_net=mymodel.get_layer('RPN_Net')
+        fmap,label,gt_mask,gt_coord,_,tindex=making_frcnn_input(data,rpn_net)
+        
+        cal_pos=tf.math.argmax(label,axis=2)
+        cal_pos=tf.expand_dims(cal_pos,axis=2)
+        tindex=tf.expand_dims(tindex,axis=2)
+        pos_ind=tf.where(gt_mask!=0)
+        gt_reg=tf.clip_by_value(gt_coord,-10,10)
+    
+        # 128개 중 32개만 positive sample, o.w bg
+        with tf.GradientTape() as tape:
+            
+            pred_reg,pred_obj=mymodel(data['image'],training=True)   # pred_reg = (B,2000,84) , pred_obj= (B,2000,21)
+            pred_reg=tf.reshape(pred_reg,(-1,1500,21,4))
+            reg1=tf.gather_nd(pred_reg,indices=tindex,batch_dims=1)
+            reg2=tf.gather_nd(reg1,indices=cal_pos,batch_dims=2)
+            
+            pred_reg=tf.gather_nd(reg2,indices=pos_ind)
+            gt_reg=tf.gather_nd(gt_reg,indices=pos_ind)
+            obj1=tf.gather_nd(pred_obj,indices=tindex,batch_dims=1)
+            
+            objectness_loss=loss_cls(label,obj1)  
+            bounding_box_loss=loss_bbr(gt_reg,pred_reg)
+            train_sub_loss=tf.add_n([2*objectness_loss]+[(bounding_box_loss)])  
+        
+        print(objectness_loss,bounding_box_loss)               
+        run["train/iter_obj_loss"].log(2*objectness_loss)
+        run["train/iter_reg_loss"].log(bounding_box_loss)
+        run["train/iter_loss"].log(train_sub_loss)
+        gradients=tape.gradient(train_sub_loss,mymodel.trainable_variables)
+        optimizer.apply_gradients(zip(gradients,mymodel.trainable_variables))
+        train_total_loss=tf.add(train_total_loss,train_sub_loss)
+    train_loss_list.append(tf.reduce_sum(train_total_loss)/2443) 
+    run["train/epoch_loss"].log(tf.reduce_sum(train_total_loss)/2443)
+
+    for data in tqdm(voc_valid3):
+                
+        rpn_net=mymodel.get_layer('RPN_Net')
+        fmap,label,gt_mask,gt_coord,_,tindex=making_frcnn_input(data,rpn_net)
+        
+        cal_pos=tf.math.argmax(label,axis=2)
+        cal_pos=tf.expand_dims(cal_pos,axis=2)
+        tindex=tf.expand_dims(tindex,axis=2)
+        pos_ind=tf.where(gt_mask!=0)
+        gt_reg_valid=tf.clip_by_value(gt_coord,-10,10)
+            
+        pred_reg_valid,pred_obj_valid=mymodel(data['image'],training=False)    # pred_reg = (B,2000,84) , pred_obj= (B,2000,21)
+        pred_reg_valid=tf.reshape(pred_reg_valid,(-1,1500,21,4))
+        reg1=tf.gather_nd(pred_reg_valid,indices=tindex,batch_dims=1)
+        reg2=tf.gather_nd(reg1,indices=cal_pos,batch_dims=2)
+        
+        
+        pred_reg_valid=tf.gather_nd(reg2,indices=pos_ind)
+        gt_reg_valid=tf.gather_nd(gt_reg_valid,indices=pos_ind)
+        
+        obj1=tf.gather_nd(pred_obj_valid,indices=tindex,batch_dims=1)
+        
+        objectness_loss=loss_cls(label,obj1)  
+        bounding_box_loss=loss_bbr(gt_reg_valid,pred_reg_valid)
+        valid_sub_loss=tf.add_n([2*objectness_loss]+[(bounding_box_loss)])
+        valid_total_loss=tf.add(valid_total_loss,valid_sub_loss)
+    
+        run["valid/iter_loss"].log(valid_sub_loss)
+        run["valid/iter_obj_loss"].log(2*objectness_loss)
+        run["valid/iter_reg_loss"].log(bounding_box_loss)
+        
+    valid_loss_list.append(valid_total_loss/126) 
+    run["valid/epoch_loss"].log(valid_total_loss/126)
+    
+    if True:
+        for valid in valid_set:
+            
+            rpn_net=mymodel.get_layer('RPN_Net')
+            fmap,label,gt_mask,gt_coord,proposed,tindex=making_frcnn_input(valid,rpn_net)
+            cal_pos=tf.math.argmax(label,axis=2)
+            cal_pos=tf.expand_dims(cal_pos,axis=2)
+            tindex=tf.expand_dims(tindex,axis=2)
+            reg_mask=tf.cast(tf.expand_dims(gt_mask,axis=2),dtype=tf.float32)
+            gt_reg_valid=tf.clip_by_value(gt_coord,-10,10)
+
+            pred_reg_valid,pred_obj_valid=mymodel(valid['image'],training=False)  
+            result=generate_coord(proposed,pred_reg_valid)
+            
+            argindex=tf.math.argmax(pred_obj_valid,axis=2)
+
+            bbox=tf.gather_nd(result,indices=tf.expand_dims(argindex,axis=2),batch_dims=2)
+
+            #bbox2=tf.where(tf.expand_dims(argindex,axis=2)!=20,bbox,0)
+
+            pred_obj=tf.gather_nd(pred_obj_valid,indices=tf.expand_dims(argindex,axis=2),batch_dims=2)
+            bgind=tf.where(argindex!=20)
+
+            score=tf.gather_nd(pred_obj,indices=bgind)
+
+            coord=tf.gather_nd(bbox,indices=bgind)
+
+            proposed=tf.image.non_max_suppression_with_scores(coord,score,30,iou_threshold=0.1)
+            fgind=tf.where(proposed[1]>=0.7)
+            v_pdata = tf.gather(coord, proposed[0])
+            v_pdata= tf.gather_nd(v_pdata,indices=fgind)        
+            vision_valid(tf.reshape(valid['image'],(500,500,3)),v_pdata,visable=1)
+    
+    
+    if valid_loss_list[best_valid_loss_index]>valid_loss_list[epo]:
+        best_valid_loss_index=epo
+        revision_count=0
+        weight=mymodel.get_weights()
+    else:
+        revision_count=revision_count+1
+    
+    print("Train_Loss = {}, Valid_Loss={}, revision_count = {}".format(train_loss_list[epo],valid_loss_list[epo],revision_count))
+    
+    if revision_count>=30:
+        break
+
+
+mymodel.set_weights(weight)
+url=run.get_run_url().split('/')[-1]
+mymodel.save_weights(f"./model/fasterrcnn_{url}.h5")
+run["model"].upload(f"./model/fasterrcnn_{url}.h5")
+
+run.stop()
 
 
 
