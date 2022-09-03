@@ -741,8 +741,8 @@ def generate_coord(proposed,pred_reg):
     cal_anc=tf.expand_dims(proposed,axis=2)
     w_a=cal_anc[:,:,:,3]-cal_anc[:,:,:,1]
     h_a=cal_anc[:,:,:,2]-cal_anc[:,:,:,0]  
-    x=pred_reg2[:,:,:,0]*w_a+cal_anc[:,:,:,0]
-    y=pred_reg2[:,:,:,1]*h_a+cal_anc[:,:,:,1]
+    x=pred_reg2[:,:,:,0]*w_a+cal_anc[:,:,:,1]
+    y=pred_reg2[:,:,:,1]*h_a+cal_anc[:,:,:,0]
     w=tf.math.exp(pred_reg2[:,:,:,2])*w_a
     h=tf.math.exp(pred_reg2[:,:,:,3])*h_a
     x_max=x+w
