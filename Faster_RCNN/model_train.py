@@ -428,11 +428,8 @@ class full_model(tf.keras.Model):
         return output
 '''
         
-def making_frcnn_input(data,fmap,pred_reg,pred_obj):
+def making_frcnn_input(gt_box,label,fmap,pred_reg,pred_obj):
 
-    img=data['image']
-    gt_box=data['bbox']
-    label=data['label']
     pred_obj2=tf.reshape(pred_obj,(tf.shape(fmap)[0],-1))
     a,b=tf.math.top_k(pred_obj2,k=6000)    
     candidate=tf.stack([(b//9)//31,(b//9)%31,b%9],axis=2)
@@ -597,14 +594,14 @@ for epo in range(1,epoch+1):
             reg_pos=tf.where(tf.math.equal(tf.cast(data[1],dtype=tf.int64),tf.constant(1,dtype=tf.int64))) # (5,?,4)
             y_t=tf.gather_nd(data[6],indices=reg_pos[:,:2])
             y_p=tf.gather_nd(tf.gather_nd(pred_reg,indices=data[5],batch_dims=1),indices=reg_pos[:,:2])
-            pred_obj=tf.gather_nd(pred_obj,indices=data[5],batch_dims=1)# pred_obj= (5,256)
-            pred_obj=tf.expand_dims(pred_obj,2)  
-            rpn_objectness_loss=loss_cls(data[1],pred_obj) # batch_label(objectness) :(5,256,1) vs pred_obj : (5,256,1) 
+            pred_obj2=tf.gather_nd(pred_obj,indices=data[5],batch_dims=1)# pred_obj= (5,256)
+            pred_obj2=tf.expand_dims(pred_obj2,2)  
+            rpn_objectness_loss=loss_cls(data[1],pred_obj2) # batch_label(objectness) :(5,256,1) vs pred_obj : (5,256,1) 
             rpn_bounding_box_loss=loss_bbr(y_t,y_p)
             #train_sub_loss=tf.add_n([objectness_loss/256]+[(bounding_box_loss*3.75/961)])
             rpn_train_sub_loss=tf.add_n([2*rpn_objectness_loss]+[rpn_bounding_box_loss])
         
-        fmap,label,gt_mask,gt_coord,_,tindex=making_frcnn_input({'image':data[0],'label':data[7],'bbox':data[8]},fmap,pred_reg,pred_obj)
+        fmap,label,gt_mask,gt_coord,_,tindex=making_frcnn_input(data[8],data[7],fmap,pred_reg,pred_obj)
         
         cal_pos=tf.math.argmax(label,axis=2)
         cal_pos=tf.expand_dims(cal_pos,axis=2)
@@ -624,24 +621,25 @@ for epo in range(1,epoch+1):
             
             frcn_objectness_loss=loss_cls(label,obj1)  
             frcn_bounding_box_loss=loss_bbr(gt_reg,pred_reg)
-            frcn_train_sub_loss=tf.add_n([2*frcn_objectness_loss]+[(frcn_bounding_box_loss)])  
+            frcn_train_sub_loss=tf.add_n([2*frcn_objectness_loss]+[(frcn_bounding_box_loss)])
+            frcn_train_loss=tf.add_n([frcn_train_sub_loss]+[rpn_train_sub_loss])
         
         
-        gradients2=tape2.gradient(frcn_train_sub_loss,frcn_model.trainable_variables)
+        gradients2=tape2.gradient(frcn_train_loss,frcn_model.trainable_variables)
         optimizer.apply_gradients(zip(gradients2,frcn_model.trainable_variables))        
-        gradients=tape1.gradient(tf.add_n([rpn_train_sub_loss]+[frcn_train_sub_loss]),rpn_model.trainable_variables)
+        gradients=tape1.gradient(rpn_train_sub_loss,rpn_model.trainable_variables)
         optimizer.apply_gradients(zip(gradients,rpn_model.trainable_variables))
         
-        frcn_train_total_loss=tf.add(frcn_train_total_loss,frcn_train_sub_loss)
-        rpn_train_total_loss=tf.add(rpn_train_total_loss,tf.add_n([rpn_train_sub_loss]+[frcn_train_sub_loss]))
+        frcn_train_total_loss=tf.add(frcn_train_total_loss,frcn_train_loss)
+        rpn_train_total_loss=tf.add(rpn_train_total_loss,rpn_train_sub_loss)
         
         
-        run["train/rpn_iter_loss"].log(tf.add_n([rpn_train_sub_loss]+[frcn_train_sub_loss]))
+        run["train/rpn_iter_loss"].log(rpn_train_sub_loss)
         run["train/rpn_obj_loss"].log(2*rpn_objectness_loss)
         run["train/rpn_reg_loss"].log(rpn_bounding_box_loss)
         run["train/frcn_iter_obj_loss"].log(2*frcn_objectness_loss)
         run["train/frcn_iter_reg_loss"].log(frcn_bounding_box_loss)
-        run["train/frcn_iter_loss"].log(frcn_train_sub_loss)
+        run["train/frcn_iter_loss"].log(frcn_train_loss)
         
     
     rpn_train_loss_list.append(tf.reduce_sum(rpn_train_total_loss)/2443) 
@@ -658,13 +656,13 @@ for epo in range(1,epoch+1):
         reg_pos=tf.where(tf.math.equal(tf.cast(data[1],dtype=tf.int64),tf.constant(1,dtype=tf.int64))) # (5,?,4)
         y_t=tf.gather_nd(data[6],indices=reg_pos[:,:2])
         y_p=tf.gather_nd(tf.gather_nd(pred_reg,indices=data[5],batch_dims=1),indices=reg_pos[:,:2])
-        pred_obj=tf.gather_nd(pred_obj,indices=data[5],batch_dims=1)# pred_obj= (5,256)
-        pred_obj=tf.expand_dims(pred_obj,2)  
-        rpn_objectness_loss=loss_cls(data[1],pred_obj) # batch_label(objectness) :(5,256,1) vs pred_obj : (5,256,1) 
+        pred_obj2=tf.gather_nd(pred_obj,indices=data[5],batch_dims=1)# pred_obj= (5,256)
+        pred_obj2=tf.expand_dims(pred_obj2,2)  
+        rpn_objectness_loss=loss_cls(data[1],pred_obj2) # batch_label(objectness) :(5,256,1) vs pred_obj : (5,256,1) 
         rpn_bounding_box_loss=loss_bbr(y_t,y_p)
         rpn_valid_sub_loss=tf.add_n([2*rpn_objectness_loss]+[rpn_bounding_box_loss])
         
-        fmap,label,gt_mask,gt_coord,_,tindex=making_frcnn_input({'image':data[0],'label':data[7],'bbox':data[8]},fmap,pred_reg,pred_obj)
+        fmap,label,gt_mask,gt_coord,_,tindex=making_frcnn_input(data[8],data[7],fmap,pred_reg,pred_obj)
         
         cal_pos=tf.math.argmax(label,axis=2)
         cal_pos=tf.expand_dims(cal_pos,axis=2)
@@ -686,16 +684,16 @@ for epo in range(1,epoch+1):
         frcn_bounding_box_loss=loss_bbr(gt_reg,pred_reg)
         frcn_valid_sub_loss=tf.add_n([2*frcn_objectness_loss]+[(frcn_bounding_box_loss)])  
         
-        frcn_valid_total_loss=tf.add(frcn_valid_total_loss,frcn_valid_sub_loss)
-        rpn_valid_total_loss=tf.add(rpn_valid_total_loss,tf.add_n([rpn_valid_sub_loss]+[frcn_valid_sub_loss]))
+        frcn_valid_total_loss=tf.add(frcn_valid_total_loss,tf.add_n([rpn_valid_sub_loss]+[frcn_valid_sub_loss]))
+        rpn_valid_total_loss=tf.add(rpn_valid_total_loss,rpn_valid_sub_loss)
         
         
-        run["valid/rpn_iter_loss"].log(tf.add_n([rpn_valid_sub_loss]+[frcn_valid_sub_loss]))
+        run["valid/rpn_iter_loss"].log(rpn_valid_sub_loss)
         run["valid/rpn_obj_loss"].log(2*rpn_objectness_loss)
         run["valid/rpn_reg_loss"].log(rpn_bounding_box_loss)
         run["valid/frcn_iter_obj_loss"].log(2*frcn_objectness_loss)
         run["valid/frcn_iter_reg_loss"].log(frcn_bounding_box_loss)
-        run["valid/frcn_iter_loss"].log(frcn_valid_sub_loss)
+        run["valid/frcn_iter_loss"].log(tf.add_n([rpn_valid_sub_loss]+[frcn_valid_sub_loss]))
         
     
     rpn_valid_loss_list.append(tf.reduce_sum(rpn_valid_total_loss)/126) 
