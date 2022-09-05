@@ -622,15 +622,14 @@ for epo in range(1,epoch+1):
             frcn_objectness_loss=loss_cls(label,obj1)  
             frcn_bounding_box_loss=loss_bbr(gt_reg,pred_reg)
             frcn_train_sub_loss=tf.add_n([2*frcn_objectness_loss]+[(frcn_bounding_box_loss)])
-            frcn_train_loss=tf.add_n([frcn_train_sub_loss]+[rpn_train_sub_loss])
         
         
-        gradients2=tape2.gradient(frcn_train_loss,frcn_model.trainable_variables)
+        gradients2=tape2.gradient(frcn_train_sub_loss,frcn_model.trainable_variables)
         optimizer.apply_gradients(zip(gradients2,frcn_model.trainable_variables))        
         gradients=tape1.gradient(rpn_train_sub_loss,rpn_model.trainable_variables)
         optimizer.apply_gradients(zip(gradients,rpn_model.trainable_variables))
         
-        frcn_train_total_loss=tf.add(frcn_train_total_loss,frcn_train_loss)
+        frcn_train_total_loss=tf.add(frcn_train_total_loss,frcn_train_sub_loss)
         rpn_train_total_loss=tf.add(rpn_train_total_loss,rpn_train_sub_loss)
         
         
@@ -639,7 +638,7 @@ for epo in range(1,epoch+1):
         run["train/rpn_reg_loss"].log(rpn_bounding_box_loss)
         run["train/frcn_iter_obj_loss"].log(2*frcn_objectness_loss)
         run["train/frcn_iter_reg_loss"].log(frcn_bounding_box_loss)
-        run["train/frcn_iter_loss"].log(frcn_train_loss)
+        run["train/frcn_iter_loss"].log(frcn_train_sub_loss)
         
     
     rpn_train_loss_list.append(tf.reduce_sum(rpn_train_total_loss)/2443) 
@@ -684,7 +683,7 @@ for epo in range(1,epoch+1):
         frcn_bounding_box_loss=loss_bbr(gt_reg,pred_reg)
         frcn_valid_sub_loss=tf.add_n([2*frcn_objectness_loss]+[(frcn_bounding_box_loss)])  
         
-        frcn_valid_total_loss=tf.add(frcn_valid_total_loss,tf.add_n([rpn_valid_sub_loss]+[frcn_valid_sub_loss]))
+        frcn_valid_total_loss=tf.add(frcn_valid_total_loss,frcn_valid_sub_loss)
         rpn_valid_total_loss=tf.add(rpn_valid_total_loss,rpn_valid_sub_loss)
         
         
@@ -693,7 +692,7 @@ for epo in range(1,epoch+1):
         run["valid/rpn_reg_loss"].log(rpn_bounding_box_loss)
         run["valid/frcn_iter_obj_loss"].log(2*frcn_objectness_loss)
         run["valid/frcn_iter_reg_loss"].log(frcn_bounding_box_loss)
-        run["valid/frcn_iter_loss"].log(tf.add_n([rpn_valid_sub_loss]+[frcn_valid_sub_loss]))
+        run["valid/frcn_iter_loss"].log(frcn_valid_sub_loss)
         
     
     rpn_valid_loss_list.append(tf.reduce_sum(rpn_valid_total_loss)/126) 
@@ -732,7 +731,7 @@ for epo in range(1,epoch+1):
     else:
         revision_count=revision_count+1
     
-    if revision_count>=30:
+    if revision_count>=50:
         break
     print("Rpn_Train_Loss = {}, Rpn_Valid_Loss={}, Frcn_Train_Loss = {}, Frcn_Valid_Loss={} revision_count = {}".format(rpn_train_loss_list[epo],rpn_valid_loss_list[epo],frcn_train_loss_list[epo],frcn_valid_loss_list[epo],revision_count))
 
@@ -743,7 +742,6 @@ url=run.get_run_url().split('/')[-1]
 rpn_model.save_weights(f"./model/model_rpn_{url}.h5")
 frcn_model.save_weights(f"./model/model_frcn_{url}.h5")
 run.stop()
-
 
 
 

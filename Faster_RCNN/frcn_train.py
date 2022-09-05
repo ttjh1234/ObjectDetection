@@ -667,7 +667,3 @@ run["model"].upload(f"./model/frcn_{url}.h5")
 
 run.stop()
 
-
-frcn_model.load_weights("./model/frcn_FAS-57.h5")
-
-

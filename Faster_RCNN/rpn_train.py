@@ -256,15 +256,19 @@ def patch_batch(data,anchor_box):
 
     anchor_box=anchor_box
     anchor=anchor_box
+    anchor_box3=tf.reshape(anchor_box,[31*31*9,4])
+
+    valid_ind=tf.where(tf.reduce_sum(tf.where(((anchor_box3>0)&(anchor_box3<1)),1,0),axis=1)==4)
+    valid_ind=tf.squeeze(valid_ind,axis=1)
 
     gt_box_size=(gt_box[:,2]-gt_box[:,0])*(gt_box[:,3]-gt_box[:,1])
-    anchor_box=tf.reshape(anchor_box,[31*31*9,1,4])
-    anchor_box_size=(anchor_box[:,:,2]-anchor_box[:,:,0])*(anchor_box[:,:,3]-anchor_box[:,:,1])
+    anchor_box2=tf.reshape(anchor_box,[31*31*9,1,4])
+    anchor_box_size=(anchor_box2[:,:,2]-anchor_box2[:,:,0])*(anchor_box2[:,:,3]-anchor_box2[:,:,1])
       
-    xmin=tf.math.maximum(anchor_box[:,:,1],gt_box[:,1])
-    ymin=tf.math.maximum(anchor_box[:,:,0],gt_box[:,0])
-    xmax=tf.math.minimum(anchor_box[:,:,3],gt_box[:,3])
-    ymax=tf.math.minimum(anchor_box[:,:,2],gt_box[:,2])
+    xmin=tf.math.maximum(anchor_box2[:,:,1],gt_box[:,1])
+    ymin=tf.math.maximum(anchor_box2[:,:,0],gt_box[:,0])
+    xmax=tf.math.minimum(anchor_box2[:,:,3],gt_box[:,3])
+    ymax=tf.math.minimum(anchor_box2[:,:,2],gt_box[:,2])
 
     intersection=(xmax-xmin)*(ymax-ymin)
     intersection2=tf.where((xmax>xmin)&(ymax>ymin),intersection,0)
@@ -276,8 +280,10 @@ def patch_batch(data,anchor_box):
     # 추가로 해야 할 부분
     # 도출된 iou값을 기준으로 index를 알아와서 positive와 negative 구분하기.
     pos=tf.expand_dims(tf.math.argmax(iou,axis=1),axis=1)
-    ind_list=tf.expand_dims(tf.range(0,8649,dtype=tf.int64),axis=1)
-    ind=tf.concat([ind_list,pos],axis=1)
+    #ind_list=tf.expand_dims(tf.range(0,8649,dtype=tf.int64),axis=1)
+    pos=tf.gather(pos,indices=valid_ind)
+    
+    ind=tf.concat([tf.expand_dims(valid_ind,axis=1),pos],axis=1)
     
     pos2=tf.gather_nd(iou,indices=ind,batch_dims=0)
     survive_ind=tf.where(pos2>0.3)
@@ -286,18 +292,20 @@ def patch_batch(data,anchor_box):
     
     #positive_index=tf.where(iou>=0.7)
     #iou_positive=tf.where(iou>=0.7)
-    negative_index=tf.where(iou<0.3)
-    iou_negative=tf.where(iou<0.3)
+    iou2=tf.gather(iou,indices=valid_ind)
+    
+    negative_index=tf.where(iou2<0.3)
     positive_pos=tf.where(iou>=0.7,1,0)
     #negative_pos=tf.where(iou<0.3,1,0)
     #unuse_pos=tf.where(tf.logical_and(iou<0.7,iou>=0.3),1,0)
     
-    #nop=tf.reduce_sum(positive_pos)
+    #nop=tf.reduce_sum(positive_pos)    
+    
     nop=tf.shape(ind2)[0]
     nop2=tf.clip_by_value(nop,tf.constant(0),tf.constant(128))
 
     positive_ind=tf.stack([(ind2[:,0]//9)//31,(ind2[:,0]//9)%31,ind2[:,0]%9,ind2[:,1]],axis=1)
-    negative_ind=tf.stack([(negative_index[:,0]//9)//31,(negative_index[:,0]//9)%31,negative_index[:,0]%9,iou_negative[:,1]],axis=1)
+    negative_ind=tf.stack([(negative_index[:,0]//9)//31,(negative_index[:,0]//9)%31,negative_index[:,0]%9,negative_index[:,1]],axis=1)
 
     pindex=tf.random.shuffle(positive_ind,name='positive_shuffle')[:nop2]
     pdata=tf.gather_nd(anchor,indices=[tf.stack([pindex[:,0],pindex[:,1],pindex[:,2]],axis=1)])
@@ -440,7 +448,6 @@ valid_set=voc_valid2.take(5)
 voc_train3=voc_train2.map(lambda x,y=anchor_box :patch_batch(x,y))
 voc_train4=voc_train3.batch(16).prefetch(16)
 
-
 voc_valid3=voc_valid2.map(lambda x,y=anchor_box :patch_batch(x,y))
 voc_valid4=voc_valid3.batch(1).prefetch(1)
 
@@ -519,7 +526,5 @@ rpn_model.save_weights(f"./model/rpn_{url}.h5")
 run["model"].upload(f"./model/rpn_{url}.h5")
 
 run.stop()
-
-
 
 
