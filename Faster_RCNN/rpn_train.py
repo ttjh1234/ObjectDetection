@@ -253,6 +253,7 @@ def making_loss_data(y_true,y_pred,anchor):
 def patch_batch(data,anchor_box):
     image=data['image']
     gt_box=data['bbox']
+    label=data['label']
 
     anchor_box=anchor_box
     anchor=anchor_box
@@ -294,8 +295,9 @@ def patch_batch(data,anchor_box):
     #iou_positive=tf.where(iou>=0.7)
     iou2=tf.gather(iou,indices=valid_ind)
     
-    negative_index=tf.where(iou2<0.3)
-    positive_pos=tf.where(iou>=0.7,1,0)
+    negative_index=tf.where(tf.reduce_max(iou2,axis=1)<0.3)
+    negative_index=tf.concat([negative_index,41*tf.ones((tf.shape(negative_index)[0],1),dtype=tf.int64)],axis=1)
+    #positive_pos=tf.where(iou>=0.7,1,0)
     #negative_pos=tf.where(iou<0.3,1,0)
     #unuse_pos=tf.where(tf.logical_and(iou<0.7,iou>=0.3),1,0)
     
@@ -338,7 +340,7 @@ def patch_batch(data,anchor_box):
     t_h_star=tf.math.log((batch_gt[:,2]-batch_gt[:,0])/h_a)/0.2
     batch_reg_gt=tf.stack([t_x_star,t_y_star,t_w_star,t_h_star],axis=1)
 
-    return image,batch_label,batch_anchor,batch_gt,gt_list,batch_pos,batch_reg_gt
+    return image,batch_label,batch_anchor,batch_gt,gt_list,batch_pos,batch_reg_gt,label,gt_box
     # 추출해야할 요소 : Anchor_box의 좌표정보와 대응되는 gt_box의 좌표정보. 
     # making_rpn_train에서 iou정보를 이용해서 마지막 차원에 몇번째 gt_box와 대응되는지 알아야함.
 

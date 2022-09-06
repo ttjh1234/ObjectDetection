@@ -230,8 +230,9 @@ def patch_batch(data,anchor_box):
     #iou_positive=tf.where(iou>=0.7)
     iou2=tf.gather(iou,indices=valid_ind)
     
-    negative_index=tf.where(iou2<0.3)
-    positive_pos=tf.where(iou>=0.7,1,0)
+    negative_index=tf.where(tf.reduce_max(iou2,axis=1)<0.3)
+    negative_index=tf.concat([negative_index,41*tf.ones((tf.shape(negative_index)[0],1),dtype=tf.int64)],axis=1)
+    #positive_pos=tf.where(iou>=0.7,1,0)
     #negative_pos=tf.where(iou<0.3,1,0)
     #unuse_pos=tf.where(tf.logical_and(iou<0.7,iou>=0.3),1,0)
     
@@ -435,7 +436,7 @@ class full_model(tf.keras.Model):
     
         return output
 '''
-        
+                
 def making_frcnn_input(gt_box,label,fmap,pred_reg,pred_obj):
 
     pred_obj2=tf.reshape(pred_obj,(tf.shape(fmap)[0],-1))
@@ -472,7 +473,6 @@ def making_frcnn_input(gt_box,label,fmap,pred_reg,pred_obj):
 
     iou3=tf.gather_nd(iou2,indices=tf.expand_dims(tf.math.argmax(iou2,axis=2),axis=2),batch_dims=2)
     plabel=tf.gather_nd(label,indices=tf.expand_dims(tf.math.argmax(iou2,axis=2),axis=2),batch_dims=1)
-
 
     p_iou=tf.where(iou3>=0.5,plabel,-1)
     
@@ -596,19 +596,18 @@ for epo in range(1,epoch+1):
 
     for data in tqdm(voc_train4):
         #image,batch_label,batch_anchor,batch_gt,gt_list,batch_pos,batch_reg_gt
-        with tf.GradientTape() as tape1:
-            fmap,pred_reg,pred_obj=rpn_model(data[0],training=True)    # pred_reg = (5,31,31,36) , pred_obj= (5,31,31,9)
-            pred_reg=tf.reshape(pred_reg,(-1,31,31,9,4)) # (5,31,31,9,4)
-            reg_pos=tf.where(tf.math.equal(tf.cast(data[1],dtype=tf.int64),tf.constant(1,dtype=tf.int64))) # (5,?,4)
-            y_t=tf.gather_nd(data[6],indices=reg_pos[:,:2])
-            y_p=tf.gather_nd(tf.gather_nd(pred_reg,indices=data[5],batch_dims=1),indices=reg_pos[:,:2])
-            pred_obj2=tf.gather_nd(pred_obj,indices=data[5],batch_dims=1)# pred_obj= (5,256)
-            pred_obj2=tf.expand_dims(pred_obj2,2)  
-            rpn_objectness_loss=rpn_loss_cls(data[1],pred_obj2) # batch_label(objectness) :(5,256,1) vs pred_obj : (5,256,1) 
-            rpn_bounding_box_loss=loss_bbr(y_t,y_p)
-            #train_sub_loss=tf.add_n([objectness_loss/256]+[(bounding_box_loss*3.75/961)])
-            rpn_train_sub_loss=tf.add_n([2*rpn_objectness_loss]+[rpn_bounding_box_loss])
-        
+        fmap,pred_reg,pred_obj=rpn_model(data[0],training=False)    # pred_reg = (5,31,31,36) , pred_obj= (5,31,31,9)
+        pred_reg=tf.reshape(pred_reg,(-1,31,31,9,4)) # (5,31,31,9,4)
+        reg_pos=tf.where(tf.math.equal(tf.cast(data[1],dtype=tf.int64),tf.constant(1,dtype=tf.int64))) # (5,?,4)
+        y_t=tf.gather_nd(data[6],indices=reg_pos[:,:2])
+        y_p=tf.gather_nd(tf.gather_nd(pred_reg,indices=data[5],batch_dims=1),indices=reg_pos[:,:2])
+        pred_obj2=tf.gather_nd(pred_obj,indices=data[5],batch_dims=1)# pred_obj= (5,256)
+        pred_obj2=tf.expand_dims(pred_obj2,2)  
+        rpn_objectness_loss=rpn_loss_cls(data[1],pred_obj2) # batch_label(objectness) :(5,256,1) vs pred_obj : (5,256,1) 
+        rpn_bounding_box_loss=loss_bbr(y_t,y_p)
+        #train_sub_loss=tf.add_n([objectness_loss/256]+[(bounding_box_loss*3.75/961)])
+        rpn_train_sub_loss=tf.add_n([2*rpn_objectness_loss]+[rpn_bounding_box_loss])
+    
         fmap,label,gt_mask,gt_coord,_,tindex=making_frcnn_input(data[8],data[7],fmap,pred_reg,pred_obj)
         
         cal_pos=tf.math.argmax(label,axis=2)
@@ -634,8 +633,8 @@ for epo in range(1,epoch+1):
         
         gradients2=tape2.gradient(frcn_train_sub_loss,frcn_model.trainable_variables)
         optimizer.apply_gradients(zip(gradients2,frcn_model.trainable_variables))        
-        gradients=tape1.gradient(rpn_train_sub_loss,rpn_model.trainable_variables)
-        optimizer.apply_gradients(zip(gradients,rpn_model.trainable_variables))
+        #gradients=tape1.gradient(rpn_train_sub_loss,rpn_model.trainable_variables)
+        #optimizer.apply_gradients(zip(gradients,rpn_model.trainable_variables))
         
         frcn_train_total_loss=tf.add(frcn_train_total_loss,frcn_train_sub_loss)
         rpn_train_total_loss=tf.add(rpn_train_total_loss,rpn_train_sub_loss)
