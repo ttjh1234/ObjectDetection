@@ -187,20 +187,23 @@ def making_valid_positive(anchor_box,gt_box,iou_threshold):
 
 def patch_batch(data,anchor_box):
     image=data['image']
-    label=data['label']
     gt_box=data['bbox']
 
     anchor_box=anchor_box
     anchor=anchor_box
+    anchor_box3=tf.reshape(anchor_box,[31*31*9,4])
+
+    valid_ind=tf.where(tf.reduce_sum(tf.where(((anchor_box3>0)&(anchor_box3<1)),1,0),axis=1)==4)
+    valid_ind=tf.squeeze(valid_ind,axis=1)
 
     gt_box_size=(gt_box[:,2]-gt_box[:,0])*(gt_box[:,3]-gt_box[:,1])
-    anchor_box=tf.reshape(anchor_box,[31*31*9,1,4])
-    anchor_box_size=(anchor_box[:,:,2]-anchor_box[:,:,0])*(anchor_box[:,:,3]-anchor_box[:,:,1])
+    anchor_box2=tf.reshape(anchor_box,[31*31*9,1,4])
+    anchor_box_size=(anchor_box2[:,:,2]-anchor_box2[:,:,0])*(anchor_box2[:,:,3]-anchor_box2[:,:,1])
       
-    xmin=tf.math.maximum(anchor_box[:,:,1],gt_box[:,1])
-    ymin=tf.math.maximum(anchor_box[:,:,0],gt_box[:,0])
-    xmax=tf.math.minimum(anchor_box[:,:,3],gt_box[:,3])
-    ymax=tf.math.minimum(anchor_box[:,:,2],gt_box[:,2])
+    xmin=tf.math.maximum(anchor_box2[:,:,1],gt_box[:,1])
+    ymin=tf.math.maximum(anchor_box2[:,:,0],gt_box[:,0])
+    xmax=tf.math.minimum(anchor_box2[:,:,3],gt_box[:,3])
+    ymax=tf.math.minimum(anchor_box2[:,:,2],gt_box[:,2])
 
     intersection=(xmax-xmin)*(ymax-ymin)
     intersection2=tf.where((xmax>xmin)&(ymax>ymin),intersection,0)
@@ -212,8 +215,10 @@ def patch_batch(data,anchor_box):
     # 추가로 해야 할 부분
     # 도출된 iou값을 기준으로 index를 알아와서 positive와 negative 구분하기.
     pos=tf.expand_dims(tf.math.argmax(iou,axis=1),axis=1)
-    ind_list=tf.expand_dims(tf.range(0,8649,dtype=tf.int64),axis=1)
-    ind=tf.concat([ind_list,pos],axis=1)
+    #ind_list=tf.expand_dims(tf.range(0,8649,dtype=tf.int64),axis=1)
+    pos=tf.gather(pos,indices=valid_ind)
+    
+    ind=tf.concat([tf.expand_dims(valid_ind,axis=1),pos],axis=1)
     
     pos2=tf.gather_nd(iou,indices=ind,batch_dims=0)
     survive_ind=tf.where(pos2>0.3)
@@ -222,18 +227,20 @@ def patch_batch(data,anchor_box):
     
     #positive_index=tf.where(iou>=0.7)
     #iou_positive=tf.where(iou>=0.7)
-    negative_index=tf.where(iou<0.3)
-    iou_negative=tf.where(iou<0.3)
+    iou2=tf.gather(iou,indices=valid_ind)
+    
+    negative_index=tf.where(iou2<0.3)
     positive_pos=tf.where(iou>=0.7,1,0)
     #negative_pos=tf.where(iou<0.3,1,0)
     #unuse_pos=tf.where(tf.logical_and(iou<0.7,iou>=0.3),1,0)
     
-    #nop=tf.reduce_sum(positive_pos)
+    #nop=tf.reduce_sum(positive_pos)    
+    
     nop=tf.shape(ind2)[0]
     nop2=tf.clip_by_value(nop,tf.constant(0),tf.constant(128))
 
     positive_ind=tf.stack([(ind2[:,0]//9)//31,(ind2[:,0]//9)%31,ind2[:,0]%9,ind2[:,1]],axis=1)
-    negative_ind=tf.stack([(negative_index[:,0]//9)//31,(negative_index[:,0]//9)%31,negative_index[:,0]%9,iou_negative[:,1]],axis=1)
+    negative_ind=tf.stack([(negative_index[:,0]//9)//31,(negative_index[:,0]//9)%31,negative_index[:,0]%9,negative_index[:,1]],axis=1)
 
     pindex=tf.random.shuffle(positive_ind,name='positive_shuffle')[:nop2]
     pdata=tf.gather_nd(anchor,indices=[tf.stack([pindex[:,0],pindex[:,1],pindex[:,2]],axis=1)])
@@ -266,7 +273,7 @@ def patch_batch(data,anchor_box):
     t_h_star=tf.math.log((batch_gt[:,2]-batch_gt[:,0])/h_a)/0.2
     batch_reg_gt=tf.stack([t_x_star,t_y_star,t_w_star,t_h_star],axis=1)
 
-    return image,batch_label,batch_anchor,batch_gt,gt_list,batch_pos,batch_reg_gt,label,gt_box
+    return image,batch_label,batch_anchor,batch_gt,gt_list,batch_pos,batch_reg_gt
     # 추출해야할 요소 : Anchor_box의 좌표정보와 대응되는 gt_box의 좌표정보. 
     # making_rpn_train에서 iou정보를 이용해서 마지막 차원에 몇번째 gt_box와 대응되는지 알아야함.
 
@@ -371,7 +378,7 @@ def construct_rpn():
     rpn_cls_output = Conv2D(9, (1, 1), activation="sigmoid",kernel_initializer=initializers, name="rpn_cls")(output)
     rpn_reg_output = Conv2D(9 * 4, (1, 1), activation="linear",kernel_initializer=initializers, name="rpn_reg")(output)
     rpn_model = Model(inputs=base_model.input, outputs=[feature_extractor.output,rpn_reg_output, rpn_cls_output],name='RPN_Net')
-    rpn_model.load_weights("./model/rpn_FAS-48.h5")
+    rpn_model.load_weights("./model/rpn_FAS-65.h5")
     return rpn_model
 
 ## Implement NMS + ROI 풀링 ##
@@ -496,8 +503,8 @@ def making_frcnn_input(gt_box,label,fmap,pred_reg,pred_obj):
             positive_pos=tf.where(i!=-1,1,0)
             negative_index=tf.where(i==-1)
             
-            nop=tf.clip_by_value(tf.reduce_sum(positive_pos),0,64)    
-            non=tf.constant(128,dtype=tf.int32)-nop
+            nop=tf.clip_by_value(tf.reduce_sum(positive_pos),0,128)    
+            non=tf.constant(256,dtype=tf.int32)-nop
             pindex=tf.random.shuffle(positive_index,name='positive_shuffle')[:nop]
             nindex=tf.random.shuffle(negative_index,name='negative_shuffle')[:non]
                         
@@ -526,8 +533,8 @@ def making_frcnn_input(gt_box,label,fmap,pred_reg,pred_obj):
         positive_pos=tf.where(p_iou!=-1,1,0)
         negative_index=tf.where(p_iou==-1)
         
-        nop=tf.clip_by_value(tf.reduce_sum(positive_pos),0,64)    
-        non=tf.constant(128,dtype=tf.int32)-nop
+        nop=tf.clip_by_value(tf.reduce_sum(positive_pos),0,128)    
+        non=tf.constant(256,dtype=tf.int32)-nop
         pindex=tf.random.shuffle(positive_index,name='positive_shuffle')[:nop]
         nindex=tf.random.shuffle(negative_index,name='negative_shuffle')[:non]
         
@@ -731,7 +738,7 @@ for epo in range(1,epoch+1):
     else:
         revision_count=revision_count+1
     
-    if revision_count>=50:
+    if revision_count>=20:
         break
     print("Rpn_Train_Loss = {}, Rpn_Valid_Loss={}, Frcn_Train_Loss = {}, Frcn_Valid_Loss={} revision_count = {}".format(rpn_train_loss_list[epo],rpn_valid_loss_list[epo],frcn_train_loss_list[epo],frcn_valid_loss_list[epo],revision_count))
 

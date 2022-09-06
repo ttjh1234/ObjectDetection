@@ -388,7 +388,7 @@ def valid_result2(valid,iou=0.3,max_n=300,visable=0):
     valid_reg3=tf.reshape(valid_reg2,(-1,4))
     # anchor_box.shape vs valid_reg.shape
     v_cls=tf.reshape(valid_cls,(-1))
-    t2=tf.where(v_cls>=0.5,v_cls,0.0)
+    t2=tf.where(v_cls>=0.8,v_cls,0.0)
     proposed_box=tf.image.non_max_suppression_with_scores(valid_reg3,t2,max_n,iou_threshold=iou)
     fgind=tf.where(proposed_box[1]>=0.5)
     v_pdata = tf.gather(valid_reg3, proposed_box[0])
@@ -425,7 +425,7 @@ class Loss_bbr(tf.keras.losses.Loss):
         base_config=super().get_config()
         return {**base_config}
 
-#rpn_model.load_weights("./model/rpn_FAS-48.h5")
+rpn_model.load_weights("./model/rpn_FAS-65.h5")
 
 epoch=1000
 step=tf.Variable(0,trainable=False)
@@ -527,4 +527,7 @@ run["model"].upload(f"./model/rpn_{url}.h5")
 
 run.stop()
 
-
+'''
+for valid in valid_set:  
+    valid_result2(valid,iou=0.1,max_n=10,visable=0)
+'''
