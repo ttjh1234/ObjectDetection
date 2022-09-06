@@ -188,6 +188,7 @@ def making_valid_positive(anchor_box,gt_box,iou_threshold):
 def patch_batch(data,anchor_box):
     image=data['image']
     gt_box=data['bbox']
+    label=data['label']
 
     anchor_box=anchor_box
     anchor=anchor_box
@@ -273,7 +274,7 @@ def patch_batch(data,anchor_box):
     t_h_star=tf.math.log((batch_gt[:,2]-batch_gt[:,0])/h_a)/0.2
     batch_reg_gt=tf.stack([t_x_star,t_y_star,t_w_star,t_h_star],axis=1)
 
-    return image,batch_label,batch_anchor,batch_gt,gt_list,batch_pos,batch_reg_gt
+    return image,batch_label,batch_anchor,batch_gt,gt_list,batch_pos,batch_reg_gt,label,gt_box
     # 추출해야할 요소 : Anchor_box의 좌표정보와 대응되는 gt_box의 좌표정보. 
     # making_rpn_train에서 iou정보를 이용해서 마지막 차원에 몇번째 gt_box와 대응되는지 알아야함.
 
@@ -569,6 +570,7 @@ frcn_valid_loss_list=[10]
 
 best_valid_loss_index=0
 revision_count=0
+rpn_loss_cls=tf.keras.losses.BinaryCrossentropy(from_logits=False)
 loss_cls=tf.keras.losses.CategoricalCrossentropy()
 loss_bbr=Loss_bbr()
 anchor_box=make_anchor()
@@ -579,7 +581,6 @@ frcn_model=construct_frcn()
 
 voc_train3=voc_train2.map(lambda x,y=anchor_box :patch_batch(x,y))
 voc_train4=voc_train3.batch(2).prefetch(2)
-
 
 voc_valid3=voc_valid2.map(lambda x,y=anchor_box :patch_batch(x,y))
 voc_valid4=voc_valid3.batch(1).prefetch(1)
@@ -603,7 +604,7 @@ for epo in range(1,epoch+1):
             y_p=tf.gather_nd(tf.gather_nd(pred_reg,indices=data[5],batch_dims=1),indices=reg_pos[:,:2])
             pred_obj2=tf.gather_nd(pred_obj,indices=data[5],batch_dims=1)# pred_obj= (5,256)
             pred_obj2=tf.expand_dims(pred_obj2,2)  
-            rpn_objectness_loss=loss_cls(data[1],pred_obj2) # batch_label(objectness) :(5,256,1) vs pred_obj : (5,256,1) 
+            rpn_objectness_loss=rpn_loss_cls(data[1],pred_obj2) # batch_label(objectness) :(5,256,1) vs pred_obj : (5,256,1) 
             rpn_bounding_box_loss=loss_bbr(y_t,y_p)
             #train_sub_loss=tf.add_n([objectness_loss/256]+[(bounding_box_loss*3.75/961)])
             rpn_train_sub_loss=tf.add_n([2*rpn_objectness_loss]+[rpn_bounding_box_loss])
@@ -664,7 +665,7 @@ for epo in range(1,epoch+1):
         y_p=tf.gather_nd(tf.gather_nd(pred_reg,indices=data[5],batch_dims=1),indices=reg_pos[:,:2])
         pred_obj2=tf.gather_nd(pred_obj,indices=data[5],batch_dims=1)# pred_obj= (5,256)
         pred_obj2=tf.expand_dims(pred_obj2,2)  
-        rpn_objectness_loss=loss_cls(data[1],pred_obj2) # batch_label(objectness) :(5,256,1) vs pred_obj : (5,256,1) 
+        rpn_objectness_loss=rpn_loss_cls(data[1],pred_obj2) # batch_label(objectness) :(5,256,1) vs pred_obj : (5,256,1) 
         rpn_bounding_box_loss=loss_bbr(y_t,y_p)
         rpn_valid_sub_loss=tf.add_n([2*rpn_objectness_loss]+[rpn_bounding_box_loss])
         
