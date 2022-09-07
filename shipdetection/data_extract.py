@@ -62,9 +62,13 @@ def parse_func(example):
     bbox_shape = tf.io.decode_raw(example["bbox_shape"], tf.int32)
     image=tf.reshape(image,image_shape)
     bbox=tf.reshape(bbox,bbox_shape)
+    paddings1 = [[0, 24-tf.shape(bbox)[0]], [0, 0]]
+    bbox = tf.pad(bbox, paddings1, 'CONSTANT', constant_values=0)
+        
     filename=tf.py_function(decode_str,[example["filename"]],[tf.string])
 
     return {'image':image,'bbox':bbox,'filename':filename}
+
 
 def deserialize_example(serialized_string):
     image_feature_description = {
@@ -75,10 +79,10 @@ def deserialize_example(serialized_string):
         "filename": tf.io.FixedLenFeature([],tf.string)
     }
     example = tf.io.parse_example(serialized_string, image_feature_description)
-    
-    dataset=tf.data.Dataset.from_tensor_slices(example).map(parse_func)
-        
+    dataset=parse_func(example)
+            
     return dataset
+
 
 def fetch_data(path):
     
@@ -561,25 +565,37 @@ with tf.io.TFRecordWriter("test.tfrecord") as f:
         print("End Extract data in one port\n")
 '''
 
+os.getcwd()
 
 # check TFRecord File
-dataset=tf.data.TFRecordDataset(["./data/train.tfrecord"]).batch(1)
+
+def load_fetched_dataset(save_dir):
+    train = tf.data.TFRecordDataset(f"{save_dir}/train.tfrecord".encode("utf-8")).map(
+        deserialize_example
+    )
+    validation = tf.data.TFRecordDataset(
+        f"{save_dir}/validation.tfrecord".encode("utf-8")
+    ).map(deserialize_example)
+    test = tf.data.TFRecordDataset(f"{save_dir}/test.tfrecord".encode("utf-8")).map(
+        deserialize_example
+    )
+
+    return train, validation, test
 
 
-# print Instance
-for i in dataset:
-    example = deserialize_example(i)
+path="./aihub/"
+train,valid,test=load_fetched_dataset(path)
+
+train2=train.padded_batch(2,padded_shapes=[(None,None,3),(None,4),(None,)],padding_values=[0,0,-1])
+
+for i in train2:
+    print(i)
     break
 
-for v in example:
-    print(v)
+    '''
+    return : 
+    'image' : (B,512,512,3), 
+    'bbox' : (B,24,4)
+    'filename' : (B,1)
+    '''
 
-# Check Number of Instance 
-k=iter(dataset)
-
-'''
-count=0
-while True:
-    next(k)
-    count=count+1
-'''

@@ -27,7 +27,6 @@ run = neptune.init(
 dataset,info=tfds.load("voc",with_info=True,split=["test","train+validation[0%:95%]","validation[95%:]"])
 info.features['labels'].names
 
-
 voc_train,voc_test,voc_valid=dataset[1],dataset[0],dataset[2]
 
 def data_preprocess(feature):
@@ -438,9 +437,20 @@ class full_model(tf.keras.Model):
     
         return output
 '''
+
+'''
+for data in voc_train4:
+    fmap,pred_reg,pred_obj=rpn_model(data[0],training=False)    # pred_reg = (5,31,31,36) , pred_obj= (5,31,31,9)
+    pred_reg=tf.reshape(pred_reg,(-1,31,31,9,4)) # (5,31,31,9,4)
+    gt_box=data[8]
+    label=data[7]
+    break
+
+'''
+
                 
 def making_frcnn_input(gt_box,label,fmap,pred_reg,pred_obj):
-
+    
     pred_obj2=tf.reshape(pred_obj,(tf.shape(fmap)[0],-1))
     a,b=tf.math.top_k(pred_obj2,k=6000)    
     candidate=tf.stack([(b//9)//31,(b//9)%31,b%9],axis=2)
@@ -467,28 +477,32 @@ def making_frcnn_input(gt_box,label,fmap,pred_reg,pred_obj):
 
     intersection=(xmax-xmin)*(ymax-ymin)
     intersection2=tf.where((xmax>xmin)&(ymax>ymin),intersection,0)
-    intersection3=tf.where(intersection2>0,intersection2,0)
+    intersection3=tf.where(intersection2>0,intersection2,1e-5)
 
     union=gt_box_size+ac_size-intersection3
     iou=intersection3/union
-    iou2=tf.where(iou>=0.5,iou,0)
+    #iou2=tf.where(iou>=0.5,iou,0)
+    iou4=tf.where(iou>=0.1,iou,0)
+    iou4=tf.clip_by_value(iou4,0,1)
 
-    iou3=tf.gather_nd(iou2,indices=tf.expand_dims(tf.math.argmax(iou2,axis=2),axis=2),batch_dims=2)
-    plabel=tf.gather_nd(label,indices=tf.expand_dims(tf.math.argmax(iou2,axis=2),axis=2),batch_dims=1)
+    #iou3=tf.gather_nd(iou2,indices=tf.expand_dims(tf.math.argmax(iou2,axis=2),axis=2),batch_dims=2)
+    plabel=tf.gather_nd(label,indices=tf.expand_dims(tf.math.argmax(iou4,axis=2),axis=2),batch_dims=1)
 
+    iou5=tf.gather_nd(iou4,indices=tf.expand_dims(tf.math.argmax(iou4,axis=2),axis=2),batch_dims=2)
     #p_iou=tf.where(iou3>=0.5,plabel,-1)
-    p_iou=tf.where((iou3>=0.1)&(iou3<0.5),-1,plabel)
-    p_iou=tf.where(iou3>=0.5,plabel,p_iou)
+    #p_iou=tf.where((iou5>=0.1)&(iou5<0.5),-1,plabel)
+    p_iou=tf.where(iou5<0.5,-1,plabel)
+    p_iou=tf.where(iou5>=0.5,plabel,p_iou)
     
     gt_mask=tf.where(p_iou!=-1,1,0)
     gt_label=tf.one_hot(p_iou,depth=21)
     gt_box2=tf.reshape(gt_box,(-1,42,4))
 
-    p_coord=tf.gather_nd(gt_box2,indices=tf.expand_dims(tf.math.argmax(iou2,axis=2),axis=2),batch_dims=1)
+    p_coord=tf.gather_nd(gt_box2,indices=tf.expand_dims(tf.math.argmax(iou4,axis=2),axis=2),batch_dims=1)
 
     # Transform gtbox coord to offset
-    w_a=proposed[:,:,3]-proposed[:,:,1]
-    h_a=proposed[:,:,2]-proposed[:,:,0]
+    w_a=tf.clip_by_value(proposed[:,:,3]-proposed[:,:,1],1e-2,1)
+    h_a=tf.clip_by_value(proposed[:,:,2]-proposed[:,:,0],1e-2,1)
     t_x_star=(p_coord[:,:,1]-proposed[:,:,1])/w_a/0.1
     t_y_star=(p_coord[:,:,0]-proposed[:,:,0])/h_a/0.1
     t_w_star=tf.math.log((p_coord[:,:,3]-p_coord[:,:,1])/w_a)/0.2
@@ -506,10 +520,14 @@ def making_frcnn_input(gt_box,label,fmap,pred_reg,pred_obj):
             i=tf.expand_dims(i,axis=0)
             positive_index=tf.where(i!=-1)
             positive_pos=tf.where(i!=-1,1,0)
+            negative_pos=tf.where(i==-1,1,0)
             negative_index=tf.where(i==-1)
             
-            nop=tf.clip_by_value(tf.reduce_sum(positive_pos),0,32)    
+            print("positive Num : ",tf.reduce_sum(positive_pos),"Negative Num : ",tf.reduce_sum(negative_pos))
+            
+            nop=tf.clip_by_value(tf.reduce_sum(positive_pos),0,64)    
             non=tf.constant(128,dtype=tf.int32)-nop
+        
             pindex=tf.random.shuffle(positive_index,name='positive_shuffle')[:nop]
             nindex=tf.random.shuffle(negative_index,name='negative_shuffle')[:non]
                         
@@ -538,7 +556,7 @@ def making_frcnn_input(gt_box,label,fmap,pred_reg,pred_obj):
         positive_pos=tf.where(p_iou!=-1,1,0)
         negative_index=tf.where(p_iou==-1)
         
-        nop=tf.clip_by_value(tf.reduce_sum(positive_pos),0,32)    
+        nop=tf.clip_by_value(tf.reduce_sum(positive_pos),0,64)    
         non=tf.constant(128,dtype=tf.int32)-nop
         pindex=tf.random.shuffle(positive_index,name='positive_shuffle')[:nop]
         nindex=tf.random.shuffle(negative_index,name='negative_shuffle')[:non]
@@ -567,10 +585,10 @@ def making_frcnn_input(gt_box,label,fmap,pred_reg,pred_obj):
 
 epoch=3000
 optimizer=tf.keras.optimizers.Adam(learning_rate=1e-5)
-rpn_train_loss_list=[10]
-rpn_valid_loss_list=[10]
-frcn_train_loss_list=[10]
-frcn_valid_loss_list=[10]
+rpn_train_loss_list=[1000]
+rpn_valid_loss_list=[1000]
+frcn_train_loss_list=[1000]
+frcn_valid_loss_list=[1000]
 
 best_valid_loss_index=0
 revision_count=0
@@ -588,7 +606,6 @@ voc_train4=voc_train3.batch(2).prefetch(2)
 
 voc_valid3=voc_valid2.map(lambda x,y=anchor_box :patch_batch(x,y))
 voc_valid4=voc_valid3.batch(1).prefetch(1)
-
 
 for epo in range(1,epoch+1):
     print("Epoch {}/{}".format(epo,epoch))
@@ -618,7 +635,7 @@ for epo in range(1,epoch+1):
         cal_pos=tf.expand_dims(cal_pos,axis=2)
         tindex=tf.expand_dims(tindex,axis=2)
         pos_ind=tf.where(gt_mask!=0)
-        gt_reg=tf.clip_by_value(gt_coord,-10,10)
+        gt_reg=tf.clip_by_value(gt_coord,-100,100)
         
         with tf.GradientTape() as tape2:
             pred_reg,pred_obj=frcn_model(fmap,training=True)   # pred_reg = (B,2000,84) , pred_obj= (B,2000,21)
@@ -635,6 +652,7 @@ for epo in range(1,epoch+1):
             frcn_train_sub_loss=tf.add_n([2*frcn_objectness_loss]+[(frcn_bounding_box_loss)])
         
         
+        print(frcn_objectness_loss,frcn_bounding_box_loss)
         gradients2=tape2.gradient(frcn_train_sub_loss,frcn_model.trainable_variables)
         optimizer.apply_gradients(zip(gradients2,frcn_model.trainable_variables))        
         #gradients=tape1.gradient(rpn_train_sub_loss,rpn_model.trainable_variables)
@@ -678,7 +696,7 @@ for epo in range(1,epoch+1):
         cal_pos=tf.expand_dims(cal_pos,axis=2)
         tindex=tf.expand_dims(tindex,axis=2)
         pos_ind=tf.where(gt_mask!=0)
-        gt_reg=tf.clip_by_value(gt_coord,-10,10)
+        gt_reg=tf.clip_by_value(gt_coord,-100,100)
         
 
         pred_reg,pred_obj=frcn_model(fmap,training=False)   # pred_reg = (B,2000,84) , pred_obj= (B,2000,21)
@@ -690,7 +708,7 @@ for epo in range(1,epoch+1):
         gt_reg=tf.gather_nd(gt_reg,indices=pos_ind)
         obj1=tf.gather_nd(pred_obj,indices=tindex,batch_dims=1)
         
-        frcn_objectness_loss=loss_cls(label,obj1)  
+        frcn_objectness_loss=loss_cls(label,obj1) 
         frcn_bounding_box_loss=loss_bbr(gt_reg,pred_reg)
         frcn_valid_sub_loss=tf.add_n([2*frcn_objectness_loss]+[(frcn_bounding_box_loss)])  
         
