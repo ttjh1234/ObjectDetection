@@ -427,7 +427,7 @@ class Loss_bbr(tf.keras.losses.Loss):
         base_config=super().get_config()
         return {**base_config}
 
-rpn_model.load_weights("./model/rpn_FAS-65.h5")
+#rpn_model.load_weights("./model/rpn_FAS-73.h5")
 
 epoch=1000
 step=tf.Variable(0,trainable=False)
@@ -531,5 +531,5 @@ run.stop()
 
 '''
 for valid in valid_set:  
-    valid_result2(valid,iou=0.1,max_n=10,visable=0)
+    valid_result2(valid,iou=0.5,max_n=20,visable=0)
 '''

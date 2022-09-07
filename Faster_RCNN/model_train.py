@@ -372,7 +372,7 @@ class Loss_bbr(tf.keras.losses.Loss):
 
 # RPN Network
 
-def construct_rpn():
+def construct_rpn(flag1=0):
     base_model = VGG16(include_top=False, input_shape=(500, 500, 3))
     feature_extractor = base_model.get_layer("block5_conv3")
     initializers=tf.keras.initializers.RandomNormal(mean=0.0, stddev=0.01, seed=None)
@@ -380,7 +380,8 @@ def construct_rpn():
     rpn_cls_output = Conv2D(9, (1, 1), activation="sigmoid",kernel_initializer=initializers, name="rpn_cls")(output)
     rpn_reg_output = Conv2D(9 * 4, (1, 1), activation="linear",kernel_initializer=initializers, name="rpn_reg")(output)
     rpn_model = Model(inputs=base_model.input, outputs=[feature_extractor.output,rpn_reg_output, rpn_cls_output],name='RPN_Net')
-    rpn_model.load_weights("./model/rpn_FAS-65.h5")
+    if flag1==1:
+        rpn_model.load_weights("./model/rpn_FAS-73.h5")
     return rpn_model
 
 ## Implement NMS + ROI 풀링 ##
@@ -389,7 +390,7 @@ def construct_rpn():
 #print(pred_reg.shape , pred_obj.shape)
 
 ## FAST_RCNN Layer
-def construct_frcn():
+def construct_frcn(flag1=0):
     inputs=tf.keras.Input((1500,14,14,512),name='crop_image_interpolation')
     layer1=tf.keras.layers.TimeDistributed(tf.keras.layers.MaxPool2D((2,2)),name='ROI_Pool')(inputs)
     layer2=tf.keras.layers.TimeDistributed(tf.keras.layers.Flatten(),name='Flatten')(layer1)
@@ -400,7 +401,8 @@ def construct_frcn():
     cls_layer=tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(21,activation='softmax',name='classifier'))(layer6)
     reg_layer=tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(21*4,activation='linear',name='bbox_correction'))(layer6)
     frcn_model=Model(inputs=inputs,outputs=[reg_layer,cls_layer],name='Faster_RCNN_Model')
-    frcn_model.load_weights("./model/frcn_FAS-57.h5")
+    if flag1==1:
+        frcn_model.load_weights("./model/frcn_FAS-57.h5")
     return frcn_model
 
 def process_fmap(fmap,score,coord,anchor_box):
@@ -474,7 +476,9 @@ def making_frcnn_input(gt_box,label,fmap,pred_reg,pred_obj):
     iou3=tf.gather_nd(iou2,indices=tf.expand_dims(tf.math.argmax(iou2,axis=2),axis=2),batch_dims=2)
     plabel=tf.gather_nd(label,indices=tf.expand_dims(tf.math.argmax(iou2,axis=2),axis=2),batch_dims=1)
 
-    p_iou=tf.where(iou3>=0.5,plabel,-1)
+    #p_iou=tf.where(iou3>=0.5,plabel,-1)
+    p_iou=tf.where((iou3>=0.1)&(iou3<0.5),-1,plabel)
+    p_iou=tf.where(iou3>=0.5,plabel,p_iou)
     
     gt_mask=tf.where(p_iou!=-1,1,0)
     gt_label=tf.one_hot(p_iou,depth=21)
@@ -504,8 +508,8 @@ def making_frcnn_input(gt_box,label,fmap,pred_reg,pred_obj):
             positive_pos=tf.where(i!=-1,1,0)
             negative_index=tf.where(i==-1)
             
-            nop=tf.clip_by_value(tf.reduce_sum(positive_pos),0,128)    
-            non=tf.constant(256,dtype=tf.int32)-nop
+            nop=tf.clip_by_value(tf.reduce_sum(positive_pos),0,32)    
+            non=tf.constant(128,dtype=tf.int32)-nop
             pindex=tf.random.shuffle(positive_index,name='positive_shuffle')[:nop]
             nindex=tf.random.shuffle(negative_index,name='negative_shuffle')[:non]
                         
@@ -534,8 +538,8 @@ def making_frcnn_input(gt_box,label,fmap,pred_reg,pred_obj):
         positive_pos=tf.where(p_iou!=-1,1,0)
         negative_index=tf.where(p_iou==-1)
         
-        nop=tf.clip_by_value(tf.reduce_sum(positive_pos),0,128)    
-        non=tf.constant(256,dtype=tf.int32)-nop
+        nop=tf.clip_by_value(tf.reduce_sum(positive_pos),0,32)    
+        non=tf.constant(128,dtype=tf.int32)-nop
         pindex=tf.random.shuffle(positive_index,name='positive_shuffle')[:nop]
         nindex=tf.random.shuffle(negative_index,name='negative_shuffle')[:non]
         
@@ -575,7 +579,7 @@ loss_cls=tf.keras.losses.CategoricalCrossentropy()
 loss_bbr=Loss_bbr()
 anchor_box=make_anchor()
 valid_set=voc_valid2.take(5).batch(1)
-rpn_model=construct_rpn()
+rpn_model=construct_rpn(flag1=1)
 frcn_model=construct_frcn()
 
 
@@ -723,8 +727,8 @@ for epo in range(1,epoch+1):
             bgind=tf.where(argindex!=20)
             score=tf.gather_nd(pred_obj,indices=bgind)
             coord=tf.gather_nd(bbox,indices=bgind)
-            proposed=tf.image.non_max_suppression_with_scores(coord,score,30,iou_threshold=0.1)
-            fgind=tf.where(proposed[1]>=0.7)
+            proposed=tf.image.non_max_suppression_with_scores(coord,score,30,iou_threshold=0.7)
+            fgind=tf.where(proposed[1]>=0.9)
             v_pdata = tf.gather(coord, proposed[0])
             v_pdata= tf.gather_nd(v_pdata,indices=fgind)        
             vision_valid(tf.reshape(valid['image'],(500,500,3)),v_pdata,visable=1)
@@ -732,21 +736,20 @@ for epo in range(1,epoch+1):
     if frcn_valid_loss_list[best_valid_loss_index]>frcn_valid_loss_list[epo]:
         best_valid_loss_index=epo
         revision_count=0
-        weight1=rpn_model.get_weights()
-        weight2=frcn_model.get_weights()
+        weight=frcn_model.get_weights()
         
     else:
         revision_count=revision_count+1
     
     if revision_count>=20:
         break
-    print("Rpn_Train_Loss = {}, Rpn_Valid_Loss={}, Frcn_Train_Loss = {}, Frcn_Valid_Loss={} revision_count = {}".format(rpn_train_loss_list[epo],rpn_valid_loss_list[epo],frcn_train_loss_list[epo],frcn_valid_loss_list[epo],revision_count))
+    print("Epoch = {}, Frcn_Train_Loss = {}, Frcn_Valid_Loss={} revision_count = {}".format(epo,frcn_train_loss_list[epo],frcn_valid_loss_list[epo],revision_count))
 
 
-rpn_model.set_weights(weight1)
-frcn_model.set_weights(weight2)
+#rpn_model.set_weights(weight1)
+frcn_model.set_weights(weight)
 url=run.get_run_url().split('/')[-1]
-rpn_model.save_weights(f"./model/model_rpn_{url}.h5")
+#rpn_model.save_weights(f"./model/model_rpn_{url}.h5")
 frcn_model.save_weights(f"./model/model_frcn_{url}.h5")
 run.stop()
 
