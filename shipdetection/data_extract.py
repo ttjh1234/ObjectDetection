@@ -50,12 +50,10 @@ def serialize_example(dic):
     return example.SerializeToString()
 
 
-def decode_str(strtensor):
-    raw_string = str(strtensor.numpy(),'utf-8')
-    return raw_string
-
-
 def parse_func(example):
+    '''
+    fixed length padding     
+    '''
     image = tf.io.decode_raw(example["image"], tf.float32)
     image_shape = tf.io.decode_raw(example["image_shape"], tf.int32)
     bbox = tf.io.decode_raw(example["bbox"], tf.float32)
@@ -65,9 +63,15 @@ def parse_func(example):
     paddings1 = [[0, 24-tf.shape(bbox)[0]], [0, 0]]
     bbox = tf.pad(bbox, paddings1, 'CONSTANT', constant_values=0)
         
-    filename=tf.py_function(decode_str,[example["filename"]],[tf.string])
+    #filename=tf.py_function(decode_str,[example["filename"]],[tf.string])
+    filename=example["filename"]
 
     return {'image':image,'bbox':bbox,'filename':filename}
+
+def decode_filename(strtensor):
+    strtensor=strtensor.numpy()
+    filename=[str(i,'utf-8') for i in strtensor]
+    return filename
 
 
 def deserialize_example(serialized_string):
@@ -585,17 +589,7 @@ def load_fetched_dataset(save_dir):
 
 path="./aihub/"
 train,valid,test=load_fetched_dataset(path)
+train2=train.batch(2)
 
-train2=train.padded_batch(2,padded_shapes=[(None,None,3),(None,4),(None,)],padding_values=[0,0,-1])
 
-for i in train2:
-    print(i)
-    break
-
-    '''
-    return : 
-    'image' : (B,512,512,3), 
-    'bbox' : (B,24,4)
-    'filename' : (B,1)
-    '''
 
