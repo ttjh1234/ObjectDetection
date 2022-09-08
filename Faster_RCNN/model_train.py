@@ -332,22 +332,21 @@ def valid_result2(valid,iou=0.3,max_n=300,visable=0):
     vision_valid(valid["image"],v_pdata,visable)
 
 def generate_coord(proposed,pred_reg):
-    pred_reg2=tf.reshape(pred_reg,(-1,1500,21,4))
+    #pred_reg2=tf.reshape(pred_reg,(-1,1500,21,4))
     # offset을 원래 ymin,xmin,ymax,xmax로 변환
-    cal_anc=tf.expand_dims(proposed,axis=2)
-    w_a=cal_anc[:,:,:,3]-cal_anc[:,:,:,1]
-    h_a=cal_anc[:,:,:,2]-cal_anc[:,:,:,0]  
-    x=pred_reg2[:,:,:,0]*w_a*0.1+cal_anc[:,:,:,1]
-    y=pred_reg2[:,:,:,1]*h_a*0.1+cal_anc[:,:,:,0]
-    w=tf.math.exp(pred_reg2[:,:,:,2]*0.2)*w_a
-    h=tf.math.exp(pred_reg2[:,:,:,3]*0.2)*h_a
+    w_a=tf.clip_by_value(proposed[:,:,3]-proposed[:,:,1],1e-2,1)
+    h_a=tf.clip_by_value(proposed[:,:,2]-proposed[:,:,0],1e-2,1) 
+    x=pred_reg[:,:,0]*w_a*0.1+proposed[:,:,1]
+    y=pred_reg[:,:,1]*h_a*0.1+proposed[:,:,0]
+    w=tf.math.exp(pred_reg[:,:,2]*0.2)*w_a
+    h=tf.math.exp(pred_reg[:,:,3]*0.2)*h_a
     x_max=x+w
     y_max=y+h
     y=tf.clip_by_value(y,0,1)
     x=tf.clip_by_value(x,0,1)
     y_max=tf.clip_by_value(y_max,0,1)
     x_max=tf.clip_by_value(x_max,0,1)
-    pred_value=tf.stack([y,x,y_max,x_max],axis=3)
+    pred_value=tf.stack([y,x,y_max,x_max],axis=2)
     return pred_value
 
 # Huber Loss
@@ -401,7 +400,7 @@ def construct_frcn(flag1=0):
     reg_layer=tf.keras.layers.TimeDistributed(tf.keras.layers.Dense(21*4,activation='linear',name='bbox_correction'))(layer6)
     frcn_model=Model(inputs=inputs,outputs=[reg_layer,cls_layer],name='Faster_RCNN_Model')
     if flag1==1:
-        frcn_model.load_weights("./model/frcn_FAS-57.h5")
+        frcn_model.load_weights("./model/model_frcn_FAS-82.h5")
     return frcn_model
 
 def process_fmap(fmap,score,coord,anchor_box):
@@ -523,9 +522,7 @@ def making_frcnn_input(gt_box,label,fmap,pred_reg,pred_obj):
             negative_pos=tf.where(i==-1,1,0)
             negative_index=tf.where(i==-1)
             
-            print("positive Num : ",tf.reduce_sum(positive_pos),"Negative Num : ",tf.reduce_sum(negative_pos))
-            
-            nop=tf.clip_by_value(tf.reduce_sum(positive_pos),0,64)    
+            nop=tf.clip_by_value(tf.reduce_sum(positive_pos),0,32)    
             non=tf.constant(128,dtype=tf.int32)-nop
         
             pindex=tf.random.shuffle(positive_index,name='positive_shuffle')[:nop]
@@ -556,7 +553,7 @@ def making_frcnn_input(gt_box,label,fmap,pred_reg,pred_obj):
         positive_pos=tf.where(p_iou!=-1,1,0)
         negative_index=tf.where(p_iou==-1)
         
-        nop=tf.clip_by_value(tf.reduce_sum(positive_pos),0,64)    
+        nop=tf.clip_by_value(tf.reduce_sum(positive_pos),0,32)    
         non=tf.constant(128,dtype=tf.int32)-nop
         pindex=tf.random.shuffle(positive_index,name='positive_shuffle')[:nop]
         nindex=tf.random.shuffle(negative_index,name='negative_shuffle')[:non]
@@ -616,18 +613,18 @@ for epo in range(1,epoch+1):
     frcn_valid_total_loss=tf.constant(0,dtype=tf.float32)
 
     for data in tqdm(voc_train4):
+        with tf.GradientTape() as tape1:
         #image,batch_label,batch_anchor,batch_gt,gt_list,batch_pos,batch_reg_gt
-        fmap,pred_reg,pred_obj=rpn_model(data[0],training=False)    # pred_reg = (5,31,31,36) , pred_obj= (5,31,31,9)
-        pred_reg=tf.reshape(pred_reg,(-1,31,31,9,4)) # (5,31,31,9,4)
-        reg_pos=tf.where(tf.math.equal(tf.cast(data[1],dtype=tf.int64),tf.constant(1,dtype=tf.int64))) # (5,?,4)
-        y_t=tf.gather_nd(data[6],indices=reg_pos[:,:2])
-        y_p=tf.gather_nd(tf.gather_nd(pred_reg,indices=data[5],batch_dims=1),indices=reg_pos[:,:2])
-        pred_obj2=tf.gather_nd(pred_obj,indices=data[5],batch_dims=1)# pred_obj= (5,256)
-        pred_obj2=tf.expand_dims(pred_obj2,2)  
-        rpn_objectness_loss=rpn_loss_cls(data[1],pred_obj2) # batch_label(objectness) :(5,256,1) vs pred_obj : (5,256,1) 
-        rpn_bounding_box_loss=loss_bbr(y_t,y_p)
-        #train_sub_loss=tf.add_n([objectness_loss/256]+[(bounding_box_loss*3.75/961)])
-        rpn_train_sub_loss=tf.add_n([2*rpn_objectness_loss]+[rpn_bounding_box_loss])
+            fmap,pred_reg,pred_obj=rpn_model(data[0],training=True)    # pred_reg = (5,31,31,36) , pred_obj= (5,31,31,9)
+            pred_reg=tf.reshape(pred_reg,(-1,31,31,9,4)) # (5,31,31,9,4)
+            reg_pos=tf.where(tf.math.equal(tf.cast(data[1],dtype=tf.int64),tf.constant(1,dtype=tf.int64))) # (5,?,4)
+            y_t=tf.gather_nd(data[6],indices=reg_pos[:,:2])
+            y_p=tf.gather_nd(tf.gather_nd(pred_reg,indices=data[5],batch_dims=1),indices=reg_pos[:,:2])
+            pred_obj2=tf.gather_nd(pred_obj,indices=data[5],batch_dims=1)# pred_obj= (5,256)
+            pred_obj2=tf.expand_dims(pred_obj2,2)  
+            rpn_objectness_loss=rpn_loss_cls(data[1],pred_obj2) # batch_label(objectness) :(5,256,1) vs pred_obj : (5,256,1) 
+            rpn_bounding_box_loss=loss_bbr(y_t,y_p)
+            rpn_train_sub_loss=tf.add_n([2*rpn_objectness_loss]+[rpn_bounding_box_loss])
     
         fmap,label,gt_mask,gt_coord,_,tindex=making_frcnn_input(data[8],data[7],fmap,pred_reg,pred_obj)
         
@@ -652,11 +649,11 @@ for epo in range(1,epoch+1):
             frcn_train_sub_loss=tf.add_n([2*frcn_objectness_loss]+[(frcn_bounding_box_loss)])
         
         
-        print(frcn_objectness_loss,frcn_bounding_box_loss)
+        #print(frcn_objectness_loss,frcn_bounding_box_loss)
         gradients2=tape2.gradient(frcn_train_sub_loss,frcn_model.trainable_variables)
         optimizer.apply_gradients(zip(gradients2,frcn_model.trainable_variables))        
-        #gradients=tape1.gradient(rpn_train_sub_loss,rpn_model.trainable_variables)
-        #optimizer.apply_gradients(zip(gradients,rpn_model.trainable_variables))
+        gradients=tape1.gradient(rpn_train_sub_loss,rpn_model.trainable_variables)
+        optimizer.apply_gradients(zip(gradients,rpn_model.trainable_variables))
         
         frcn_train_total_loss=tf.add(frcn_train_total_loss,frcn_train_sub_loss)
         rpn_train_total_loss=tf.add(rpn_train_total_loss,rpn_train_sub_loss)
@@ -733,18 +730,21 @@ for epo in range(1,epoch+1):
     
     if True:
         for valid in valid_set:
-            fmap,pred_reg,pred_obj=rpn_model(valid['image'],training=False)    # pred_reg = (5,31,31,36) , pred_obj= (5,31,31,9)
+            fmap,pred_reg,pred_obj=rpn_model(valid['image'],training=False) 
+            pred_reg=tf.reshape(pred_reg,(-1,31,31,9,4))
             crop_fmap,proposed=process_fmap(fmap,pred_obj,pred_reg,anchor_box)
 
-            pred_reg_valid,pred_obj_valid=frcn_model(crop_fmap,training=False)  
-            result=generate_coord(proposed,pred_reg_valid)
-            
+            pred_reg_valid,pred_obj_valid=frcn_model(crop_fmap,training=False)
+            pred_reg_valid=tf.reshape(pred_reg_valid,(-1,1500,21,4))
             argindex=tf.math.argmax(pred_obj_valid,axis=2)
-            bbox=tf.gather_nd(result,indices=tf.expand_dims(argindex,axis=2),batch_dims=2)
+            offset=tf.gather_nd(pred_reg_valid,indices=tf.expand_dims(argindex,axis=2),batch_dims=2)            
+            result=generate_coord(proposed,offset)
             pred_obj=tf.gather_nd(pred_obj_valid,indices=tf.expand_dims(argindex,axis=2),batch_dims=2)
+            
+            
             bgind=tf.where(argindex!=20)
             score=tf.gather_nd(pred_obj,indices=bgind)
-            coord=tf.gather_nd(bbox,indices=bgind)
+            coord=tf.gather_nd(result,indices=bgind)
             proposed=tf.image.non_max_suppression_with_scores(coord,score,30,iou_threshold=0.7)
             fgind=tf.where(proposed[1]>=0.9)
             v_pdata = tf.gather(coord, proposed[0])
@@ -754,20 +754,21 @@ for epo in range(1,epoch+1):
     if frcn_valid_loss_list[best_valid_loss_index]>frcn_valid_loss_list[epo]:
         best_valid_loss_index=epo
         revision_count=0
-        weight=frcn_model.get_weights()
+        weight1=rpn_model.get_weights()
+        weight2=frcn_model.get_weights()
         
     else:
         revision_count=revision_count+1
     
-    if revision_count>=20:
+    if revision_count>=10:
         break
     print("Epoch = {}, Frcn_Train_Loss = {}, Frcn_Valid_Loss={} revision_count = {}".format(epo,frcn_train_loss_list[epo],frcn_valid_loss_list[epo],revision_count))
 
 
-#rpn_model.set_weights(weight1)
-frcn_model.set_weights(weight)
+rpn_model.set_weights(weight1)
+frcn_model.set_weights(weight2)
 url=run.get_run_url().split('/')[-1]
-#rpn_model.save_weights(f"./model/model_rpn_{url}.h5")
+rpn_model.save_weights(f"./model/model_rpn_{url}.h5")
 frcn_model.save_weights(f"./model/model_frcn_{url}.h5")
 run.stop()
 

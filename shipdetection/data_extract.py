@@ -569,7 +569,6 @@ with tf.io.TFRecordWriter("test.tfrecord") as f:
         print("End Extract data in one port\n")
 '''
 
-os.getcwd()
 
 # check TFRecord File
 
@@ -590,6 +589,10 @@ def load_fetched_dataset(save_dir):
 path="./aihub/"
 train,valid,test=load_fetched_dataset(path)
 train2=train.batch(2)
+
+for i in train2:
+    print(decode_filename(i['filename']))
+
 
 
 
