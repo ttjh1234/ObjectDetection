@@ -18,7 +18,6 @@ import cv2
 from tqdm import tqdm
 import os
 from PIL import Image
-from time import *
 
 run = neptune.init(
     project="sungsu/Faster-R-CNN",
@@ -43,8 +42,6 @@ def data_preprocess(feature):
     image=tf.image.resize(img,[500,500])
 
     return {"image":image,"bbox":bbox,"label":label}
-
-
 
 def augmentation_data(img,label,bbox):
 
@@ -127,7 +124,7 @@ def make_anchor():
 
 
 # vision_valid : print image and bbox
-def vision_valid(image,gt_box,visable=0,file_save=0):
+def vision_valid(image,gt_box,visable=0):
     img_rgb_copy = image.numpy().copy()/255.0
     green_rgb = (125, 255, 51)
     for rect in gt_box:
@@ -148,14 +145,6 @@ def vision_valid(image,gt_box,visable=0,file_save=0):
         img=(img_rgb_copy*255).astype("uint8")
         img=Image.fromarray(img)
         run["outputs/rpn_valid"].log(neptune.types.File.as_image(img))
-    
-    if file_save==1:
-        img=(img_rgb_copy*255).astype("uint8")
-        img=Image.fromarray(img)
-        name=str(int(time()))+'.png'
-        while name in os.listdir("C:/Users/UOS/Desktop/result/"):
-            name=str(int(time()))+'.png'
-        img.save("C:/Users/UOS/Desktop/result/"+name)
 
 
 def making_valid_positive(anchor_box,gt_box,iou_threshold):
@@ -307,7 +296,7 @@ def inverse_trans(anchor_box,pred_reg):
     pred_value=tf.stack([y,x,y_max,x_max],axis=4)
     return pred_value
 
-def valid_result(valid,iou=0.5,max_n=300,visable=0,file_save=0):
+def valid_result(valid,iou=0.5,max_n=300,visable=0):
     valid_reg,valid_cls=rpn_model(tf.expand_dims(valid["image"],axis=0),training=False)
     print("GT Results")
     vision_valid(valid["image"],valid["bbox"])
@@ -321,10 +310,10 @@ def valid_result(valid,iou=0.5,max_n=300,visable=0,file_save=0):
         v_cls=tf.gather_nd(tf.reshape(valid_cls,(31,31,9,1)),indices=tf.unstack(v_pind[:,:3]))
         proposed_box=tf.image.non_max_suppression(v_pdata,tf.reshape(v_cls,(-1)),max_n,iou_threshold=0.5)
         v_pdata = tf.gather(v_pdata, proposed_box)
-        vision_valid(valid["image"],v_pdata,visable,file_save)
+        vision_valid(valid["image"],v_pdata,visable)
 
 # RPN Network Performance test
-def valid_result2(valid,iou=0.3,max_n=300,visable=0,file_save=0):
+def valid_result2(valid,iou=0.3,max_n=300,visable=0):
     valid_reg,valid_cls=rpn_model(tf.expand_dims(valid["image"],axis=0),training=False)
     print("GT Results")
     vision_valid(valid["image"],valid["bbox"],visable)
@@ -338,7 +327,7 @@ def valid_result2(valid,iou=0.3,max_n=300,visable=0,file_save=0):
     fgind=tf.where(proposed_box[1]>=0.5)
     v_pdata = tf.gather(valid_reg3, proposed_box[0])
     v_pdata= tf.gather_nd(v_pdata,indices=fgind)
-    vision_valid(valid["image"],v_pdata,visable,file_save)
+    vision_valid(valid["image"],v_pdata,visable)
 
 def generate_coord(proposed,pred_reg):
     #pred_reg2=tf.reshape(pred_reg,(-1,1500,21,4))
@@ -456,7 +445,14 @@ for data in voc_train4:
 
 '''
 
-                
+'''
+fmap,pred_reg,pred_obj=rpn_model(data[0],training=True)    # pred_reg = (5,31,31,36) , pred_obj= (5,31,31,9)
+pred_reg=tf.reshape(pred_reg,(-1,31,31,9,4)) # (5,31,31,9,4)
+fmap,label,gt_mask,gt_coord,_,tindex=making_frcnn_input(data[8],data[7],fmap,pred_reg,pred_obj)
+gt_box=data[8]
+label=data[7]
+'''
+
 def making_frcnn_input(gt_box,label,fmap,pred_reg,pred_obj):
     
     pred_obj2=tf.reshape(pred_obj,(tf.shape(fmap)[0],-1))
@@ -490,7 +486,7 @@ def making_frcnn_input(gt_box,label,fmap,pred_reg,pred_obj):
     union=gt_box_size+ac_size-intersection3
     iou=intersection3/union
     #iou2=tf.where(iou>=0.5,iou,0)
-    iou4=tf.where(iou>=0.1,iou,0)
+    iou4=tf.where(iou>=0.1,iou,0.001)
     iou4=tf.clip_by_value(iou4,0,1)
 
     #iou3=tf.gather_nd(iou2,indices=tf.expand_dims(tf.math.argmax(iou2,axis=2),axis=2),batch_dims=2)
@@ -499,11 +495,12 @@ def making_frcnn_input(gt_box,label,fmap,pred_reg,pred_obj):
     iou5=tf.gather_nd(iou4,indices=tf.expand_dims(tf.math.argmax(iou4,axis=2),axis=2),batch_dims=2)
     #p_iou=tf.where(iou3>=0.5,plabel,-1)
     #p_iou=tf.where((iou5>=0.1)&(iou5<0.5),-1,plabel)
-    p_iou=tf.where(iou5<0.5,-1,plabel)
+    p_iou=tf.where(iou5<0.5,20,plabel)
     p_iou=tf.where(iou5>=0.5,plabel,p_iou)
-    
-    gt_mask=tf.where(p_iou!=-1,1,0)
-    gt_label=tf.one_hot(p_iou,depth=21)
+    p_iou2=tf.where(iou5>0.001,p_iou,-1)
+     
+    gt_mask=tf.where((p_iou2!=20)&(p_iou2!=-1),1,0)
+    gt_label=tf.one_hot(p_iou2,depth=21)
     gt_box2=tf.reshape(gt_box,(-1,42,4))
 
     p_coord=tf.gather_nd(gt_box2,indices=tf.expand_dims(tf.math.argmax(iou4,axis=2),axis=2),batch_dims=1)
@@ -524,16 +521,20 @@ def making_frcnn_input(gt_box,label,fmap,pred_reg,pred_obj):
     # 현재, BG인 경우와 FG인 경우 식별 가능한 변수 => 
     
     if tf.shape(crop_fmap)[0]==2:
-        for n,i in enumerate(p_iou):
+        for n,i in enumerate(p_iou2):
             i=tf.expand_dims(i,axis=0)
-            positive_index=tf.where(i!=-1)
-            positive_pos=tf.where(i!=-1,1,0)
-            negative_pos=tf.where(i==-1,1,0)
-            negative_index=tf.where(i==-1)
+            positive_index=tf.where((i!=20)&(i!=-1))
+            positive_pos=tf.where((i!=20)&(i!=-1),1,0)
+            negative_pos=tf.where((i==20),1,0)
+            negative_index=tf.where(i==20)
             
-            nop=tf.clip_by_value(tf.reduce_sum(positive_pos),0,32)    
-            non=tf.constant(128,dtype=tf.int32)-nop
-        
+            
+            nop=tf.clip_by_value(tf.reduce_sum(positive_pos),0,16)    
+            non=tf.constant(64,dtype=tf.int32)-nop
+
+            nop2=tf.reduce_sum(positive_pos)
+            non2=tf.reduce_sum(negative_pos)
+            print("Nop : ",nop2.numpy(),"Non : ",non2.numpy())
             pindex=tf.random.shuffle(positive_index,name='positive_shuffle')[:nop]
             nindex=tf.random.shuffle(negative_index,name='negative_shuffle')[:non]
                         
@@ -558,12 +559,12 @@ def making_frcnn_input(gt_box,label,fmap,pred_reg,pred_obj):
                 gt_mask2=tf.concat([gt_mask2,temp_gt_mask2],axis=0)
                 tindex=tf.concat([tf.expand_dims(tindex[:,1],axis=0),tf.expand_dims(temp_tindex[:,1],axis=0)],axis=0)
     else:
-        positive_index=tf.where(p_iou!=-1)
-        positive_pos=tf.where(p_iou!=-1,1,0)
-        negative_index=tf.where(p_iou==-1)
+        positive_index=tf.where((p_iou2!=20)&(p_iou2!=-1))
+        positive_pos=tf.where((p_iou2!=20)&(p_iou2!=-1),1,0)
+        negative_index=tf.where(p_iou2==20)
         
-        nop=tf.clip_by_value(tf.reduce_sum(positive_pos),0,32)    
-        non=tf.constant(128,dtype=tf.int32)-nop
+        nop=tf.clip_by_value(tf.reduce_sum(positive_pos),0,16)    
+        non=tf.constant(64,dtype=tf.int32)-nop
         pindex=tf.random.shuffle(positive_index,name='positive_shuffle')[:nop]
         nindex=tf.random.shuffle(negative_index,name='negative_shuffle')[:non]
         
@@ -636,7 +637,7 @@ for epo in range(1,epoch+1):
             rpn_objectness_loss=rpn_loss_cls(data[1],pred_obj2) # batch_label(objectness) :(5,256,1) vs pred_obj : (5,256,1) 
             rpn_bounding_box_loss=loss_bbr(y_t,y_p)
             rpn_train_sub_loss=tf.add_n([2*rpn_objectness_loss]+[rpn_bounding_box_loss])
-    
+
         fmap,label,gt_mask,gt_coord,_,tindex=making_frcnn_input(data[8],data[7],fmap,pred_reg,pred_obj)
         
         cal_pos=tf.math.argmax(label,axis=2)
@@ -783,42 +784,13 @@ rpn_model.save_weights(f"./model/model_rpn_{url}.h5")
 frcn_model.save_weights(f"./model/model_frcn_{url}.h5")
 run.stop()
 
-
-''' 
-model test
-'''
-rpn_model=construct_rpn(flag1=0)
-frcn_model=construct_frcn(flag1=0)
-
-#rpn_model.load_weights("./model/model_rpn_FAS-89.h5")
-rpn_model.load_weights("./model/rpn_FAS-73.h5")
-frcn_model.load_weights("./model/model_frcn_FAS-89.h5")
-
-valid_set2=voc_valid2.batch(1)
-
-for valid in valid_set2:
-    fmap,pred_reg,pred_obj=rpn_model(valid['image'],training=False) 
-    pred_reg=tf.reshape(pred_reg,(-1,31,31,9,4))
-    crop_fmap,proposed=process_fmap(fmap,pred_obj,pred_reg,anchor_box)
-
-    pred_reg_valid,pred_obj_valid=frcn_model(crop_fmap,training=False)
-    pred_reg_valid=tf.reshape(pred_reg_valid,(-1,1500,21,4))
-    argindex=tf.math.argmax(pred_obj_valid,axis=2)
-    offset=tf.gather_nd(pred_reg_valid,indices=tf.expand_dims(argindex,axis=2),batch_dims=2)            
-    result=generate_coord(proposed,offset)
-    pred_obj=tf.gather_nd(pred_obj_valid,indices=tf.expand_dims(argindex,axis=2),batch_dims=2)
-    
-    
-    bgind=tf.where(argindex!=20)
-    score=tf.gather_nd(pred_obj,indices=bgind)
-    coord=tf.gather_nd(result,indices=bgind)
-    proposed=tf.image.non_max_suppression_with_scores(coord,score,30,iou_threshold=0.1)
-    fgind=tf.where(proposed[1]>=0.5)
-    v_pdata = tf.gather(coord, proposed[0])
-    v_pdata= tf.gather_nd(v_pdata,indices=fgind)        
-    vision_valid(tf.reshape(valid['image'],(500,500,3)),v_pdata,visable=0,file_save=1)
+def test_function():
+    for data in voc_train4:
+        fmap,pred_reg,pred_obj=rpn_model(data[0],training=False)    # pred_reg = (5,31,31,36) , pred_obj= (5,31,31,9)
+        pred_reg=tf.reshape(pred_reg,(-1,31,31,9,4)) # (5,31,31,9,4)
 
 
+        making_frcnn_input(data[8],data[7],fmap,pred_reg,pred_obj)
 
-
+test_function()
 
