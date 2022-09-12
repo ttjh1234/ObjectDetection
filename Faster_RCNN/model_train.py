@@ -341,8 +341,6 @@ def valid_result2(valid,iou=0.3,max_n=300,visable=0,file_save=0):
     vision_valid(valid["image"],v_pdata,visable,file_save)
 
 def generate_coord(proposed,pred_reg):
-    #pred_reg2=tf.reshape(pred_reg,(-1,1500,21,4))
-    # offset을 원래 ymin,xmin,ymax,xmax로 변환
     w_a=tf.clip_by_value(proposed[:,:,3]-proposed[:,:,1],1e-2,1)
     h_a=tf.clip_by_value(proposed[:,:,2]-proposed[:,:,0],1e-2,1) 
     x=pred_reg[:,:,0]*w_a*0.1+proposed[:,:,1]
@@ -456,7 +454,7 @@ for data in voc_train4:
 
 '''
 
-                
+          
 def making_frcnn_input(gt_box,label,fmap,pred_reg,pred_obj):
     
     pred_obj2=tf.reshape(pred_obj,(tf.shape(fmap)[0],-1))
@@ -499,10 +497,10 @@ def making_frcnn_input(gt_box,label,fmap,pred_reg,pred_obj):
     iou5=tf.gather_nd(iou4,indices=tf.expand_dims(tf.math.argmax(iou4,axis=2),axis=2),batch_dims=2)
     #p_iou=tf.where(iou3>=0.5,plabel,-1)
     #p_iou=tf.where((iou5>=0.1)&(iou5<0.5),-1,plabel)
-    p_iou=tf.where(iou5<0.5,-1,plabel)
+    p_iou=tf.where(iou5<0.5,20,plabel)
     p_iou=tf.where(iou5>=0.5,plabel,p_iou)
     
-    gt_mask=tf.where(p_iou!=-1,1,0)
+    gt_mask=tf.where(p_iou!=20,1,0)
     gt_label=tf.one_hot(p_iou,depth=21)
     gt_box2=tf.reshape(gt_box,(-1,42,4))
 
@@ -526,10 +524,9 @@ def making_frcnn_input(gt_box,label,fmap,pred_reg,pred_obj):
     if tf.shape(crop_fmap)[0]==2:
         for n,i in enumerate(p_iou):
             i=tf.expand_dims(i,axis=0)
-            positive_index=tf.where(i!=-1)
-            positive_pos=tf.where(i!=-1,1,0)
-            negative_pos=tf.where(i==-1,1,0)
-            negative_index=tf.where(i==-1)
+            positive_index=tf.where(i!=20)
+            positive_pos=tf.where(i!=20,1,0)
+            negative_index=tf.where(i==20)
             
             nop=tf.clip_by_value(tf.reduce_sum(positive_pos),0,32)    
             non=tf.constant(128,dtype=tf.int32)-nop
@@ -558,9 +555,9 @@ def making_frcnn_input(gt_box,label,fmap,pred_reg,pred_obj):
                 gt_mask2=tf.concat([gt_mask2,temp_gt_mask2],axis=0)
                 tindex=tf.concat([tf.expand_dims(tindex[:,1],axis=0),tf.expand_dims(temp_tindex[:,1],axis=0)],axis=0)
     else:
-        positive_index=tf.where(p_iou!=-1)
-        positive_pos=tf.where(p_iou!=-1,1,0)
-        negative_index=tf.where(p_iou==-1)
+        positive_index=tf.where(p_iou!=20)
+        positive_pos=tf.where(p_iou!=20,1,0)
+        negative_index=tf.where(p_iou==20)
         
         nop=tf.clip_by_value(tf.reduce_sum(positive_pos),0,32)    
         non=tf.constant(128,dtype=tf.int32)-nop
@@ -787,16 +784,19 @@ run.stop()
 ''' 
 model test
 '''
+
+'''
 rpn_model=construct_rpn(flag1=0)
 frcn_model=construct_frcn(flag1=0)
 
-#rpn_model.load_weights("./model/model_rpn_FAS-89.h5")
-rpn_model.load_weights("./model/rpn_FAS-73.h5")
+rpn_model.load_weights("./model/model_rpn_FAS-89.h5")
+#rpn_model.load_weights("./model/rpn_FAS-73.h5")
 frcn_model.load_weights("./model/model_frcn_FAS-89.h5")
 
 valid_set2=voc_valid2.batch(1)
+test_set=voc_test2.batch(1)
 
-for valid in valid_set2:
+for valid in test_set:
     fmap,pred_reg,pred_obj=rpn_model(valid['image'],training=False) 
     pred_reg=tf.reshape(pred_reg,(-1,31,31,9,4))
     crop_fmap,proposed=process_fmap(fmap,pred_obj,pred_reg,anchor_box)
@@ -818,7 +818,7 @@ for valid in valid_set2:
     v_pdata= tf.gather_nd(v_pdata,indices=fgind)        
     vision_valid(tf.reshape(valid['image'],(500,500,3)),v_pdata,visable=0,file_save=1)
 
-
+'''
 
 
 

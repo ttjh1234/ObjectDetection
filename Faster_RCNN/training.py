@@ -489,6 +489,8 @@ def making_frcnn_input(gt_box,label,fmap,pred_reg,pred_obj):
     iou4=tf.where(iou>=0.1,iou,0.001)
     iou4=tf.clip_by_value(iou4,0,1)
 
+    #np.where(np.sum(tf.greater_equal(iou4,0.5),axis=2)>1)
+
     #iou3=tf.gather_nd(iou2,indices=tf.expand_dims(tf.math.argmax(iou2,axis=2),axis=2),batch_dims=2)
     plabel=tf.gather_nd(label,indices=tf.expand_dims(tf.math.argmax(iou4,axis=2),axis=2),batch_dims=1)
 
