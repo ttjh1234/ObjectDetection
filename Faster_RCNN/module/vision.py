@@ -8,6 +8,7 @@ from time import *
 from .neptune import record_image
 from .data import inverse_trans
 
+
 def vision_valid(image,gt_box,run,visable=0,file_save=0):
     img_rgb_copy = image.numpy().copy()/255.0
     green_rgb = (125, 255, 51)
