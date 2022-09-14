@@ -76,7 +76,7 @@ def load_fetched_dataset(save_dir):
     return train, validation, test
 
 
-#path="C:/Users/UOS/Desktop/새론/aihub"
+path="--"
 train,valid,test=load_fetched_dataset(path)
 
 def data_preprocess(feature):
